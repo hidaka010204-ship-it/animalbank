@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx expo:*)",
+      "Bash(ls /c/Users/NGUUSER/inochitsunagi/.env*)",
+      "Bash(npm install:*)",
+      "Bash(wmic logicaldisk:*)",
+      "Bash(npm cache:*)",
+      "Bash(powershell:*)",
+      "Bash(curl -s http://localhost:8082/status)",
+      "Read(//tmp/**)",
+      "Bash(curl *)",
+      "Bash(wc *)",
+      "Bash(grep -r \"images.*TEXT\\\\|images.*json\\\\|images.*array\" \"C:\\\\\\\\Users\\\\\\\\NGUUSER\\\\\\\\inochitsunagi\" --include=\"*.sql\" --include=\"*.md\" --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(xargs stat *)",
+      "Bash(npx tsx *)"
+    ]
+  }
+}
