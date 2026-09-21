@@ -1,11 +1,11 @@
 import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { goBack } from '../lib/navigation';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -39,12 +40,23 @@ export default function AuthScreen() {
     setGoogleLoading(true);
     try {
       const redirectUrl = Linking.createURL('/');
+      if (Platform.OS === 'web') {
+        const { error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: redirectUrl },
+        });
+        if (oauthError) {
+          showAlert('ログインエラー', oauthError.message);
+          setGoogleLoading(false);
+        }
+        return;
+      }
       const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: redirectUrl, skipBrowserRedirect: true },
       });
       if (oauthError || !data.url) {
-        Alert.alert('ログインエラー', oauthError?.message ?? 'URLの取得に失敗しました');
+        showAlert('ログインエラー', oauthError?.message ?? 'URLの取得に失敗しました');
         return;
       }
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
@@ -53,7 +65,7 @@ export default function AuthScreen() {
         router.replace('/(tabs)');
       }
     } catch (e: any) {
-      Alert.alert('ログインエラー', e?.message ?? 'Googleログインに失敗しました');
+      showAlert('ログインエラー', e?.message ?? 'Googleログインに失敗しました');
     } finally {
       setGoogleLoading(false);
     }
@@ -115,7 +127,7 @@ export default function AuthScreen() {
           <View style={styles.heroBgCircle1} />
           <View style={styles.heroBgCircle2} />
 
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack(router)}>
             <Text style={styles.backBtnText}>← 戻る</Text>
           </TouchableOpacity>
 

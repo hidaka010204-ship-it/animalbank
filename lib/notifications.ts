@@ -1,18 +1,20 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// フォアグラウンドでも通知バナーを表示する
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 export async function requestPermission(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'デフォルト',
@@ -41,6 +43,7 @@ type ScheduleOptions = {
 };
 
 export async function scheduleLocalNotification({ title, body, delaySeconds = 1, data }: ScheduleOptions): Promise<void> {
+  if (Platform.OS === 'web') return;
   try {
     await Notifications.scheduleNotificationAsync({
       content: { title, body, sound: true, ...(data ? { data } : {}) },

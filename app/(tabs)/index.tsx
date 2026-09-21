@@ -2,9 +2,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Dimensions, Easing, Image, Modal,
+  ActivityIndicator, Animated, Dimensions, Easing, Image, Modal,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { showAlert } from '../../lib/alert';
 import { t } from '../../lib/i18n';
 import { PREFECTURE_STATS, useApp } from '../_appContext';
 
@@ -59,7 +60,7 @@ export default function HomeScreen() {
 
   const requireLogin = () => {
     if (!session) {
-      Alert.alert(
+      showAlert(
         'ログインが必要です',
         'お気に入り登録にはログインが必要です',
         [

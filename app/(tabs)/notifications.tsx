@@ -92,7 +92,6 @@ export default function NotificationsScreen() {
         <TouchableOpacity
           style={[styles.readAllBtn, unreadCount === 0 && styles.readAllBtnDisabled]}
           onPress={markAllRead}
-          disabled={unreadCount === 0}
         >
           <Text style={[styles.readAllTxt, unreadCount === 0 && styles.readAllTxtDisabled]}>
             ✓ すべて既読

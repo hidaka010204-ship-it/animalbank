@@ -1,10 +1,13 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { showAlert } from '../../lib/alert';
+import { uploadImageToStorage } from '../../lib/uploadImage';
+
+const IS_WEB = Platform.OS === 'web';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { PREFECTURE_STATS, useApp } from '../_appContext';
@@ -185,55 +188,22 @@ export default function AdminScreen() {
   const uploadImages = async (uris: string[], animalId: string): Promise<string[]> => {
     const urls: string[] = [];
     for (let i = 0; i < uris.length; i++) {
-      try {
-        const uri = uris[i];
-        if (!uri) continue;
-
-        // 1. ImageManipulator で JPEG に変換（変換失敗は catch で捕捉）
-        const converted = await ImageManipulator.manipulateAsync(
-          uri, [], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-        );
-        console.log(`[uploadImages] JPEG変換完了 i=${i} uri=${converted.uri}`);
-
-        // 2. FileSystem で Base64 読み込み → Uint8Array に変換
-        const base64 = await FileSystem.readAsStringAsync(converted.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (!base64 || base64.length === 0) {
-          console.warn(`[uploadImages] base64 が空 i=${i}`);
-          continue;
-        }
-        const binaryStr = atob(base64);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let j = 0; j < binaryStr.length; j++) {
-          bytes[j] = binaryStr.charCodeAt(j);
-        }
-        console.log(`[uploadImages] ArrayBuffer 作成 i=${i} byteLength=${bytes.byteLength}`);
-
-        // 3. Supabase Storage にアップロード
-        const path = `${animalId}/${i}.jpg`;
-        const { data, error } = await supabase.storage
-          .from('animal-images')
-          .upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
-
-        if (!error && data) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('animal-images')
-            .getPublicUrl(data.path);
-          if (publicUrl) urls.push(publicUrl);
-          console.log(`[uploadImages] アップロード成功 i=${i} url=${publicUrl}`);
-        } else if (error) {
-          console.warn(`[uploadImages] アップロードエラー i=${i}:`, error.message);
-        }
-      } catch (e) {
-        console.warn(`[uploadImages] 例外 i=${i}:`, e);
+      const uri = uris[i];
+      if (!uri) continue;
+      const path = `${animalId}/${i}.jpg`;
+      const publicUrl = await uploadImageToStorage(uri, 'animal-images', path);
+      if (publicUrl) {
+        urls.push(publicUrl);
+        console.log(`[uploadImages] 成功 i=${i} url=${publicUrl}`);
+      } else {
+        console.warn(`[uploadImages] 失敗 i=${i}`);
       }
     }
     return urls;
   };
 
   const register = async () => {
-    if (!animalName.trim()) return;
+    if (!animalName.trim()) { showAlert('名前を入力してください'); return; }
     setSubmitting(true);
     try {
       const speciesMap: Record<AnimalKind, string> = { '犬': 'dog', '猫': 'cat', 'その他': 'other' };
@@ -259,7 +229,7 @@ export default function AdminScreen() {
 
       if (error) {
         console.error('[register] Supabase INSERT エラー:', JSON.stringify(error));
-        Alert.alert('登録エラー', `${error.message}\n\ncode: ${error.code}`);
+        showAlert('登録エラー', `${error.message}\n\ncode: ${error.code}`);
         return;
       }
 
@@ -279,7 +249,7 @@ export default function AdminScreen() {
       setRegistered(true);
     } catch (e) {
       console.error('[register] 予期しないエラー:', e);
-      Alert.alert('エラーが発生しました', '時間をおいて再度お試しください。');
+      showAlert('エラーが発生しました', '時間をおいて再度お試しください。');
     } finally {
       setSubmitting(false);
     }
@@ -322,7 +292,7 @@ export default function AdminScreen() {
 
   // 一般ユーザー登録（animals テーブルに source='public' で保存）
   const submitUserPost = async () => {
-    if (!userPostName.trim()) return;
+    if (!userPostName.trim()) { showAlert('名前を入力してください'); return; }
     setUserPostSubmitting(true);
     try {
       const speciesMap: Record<AnimalKind, string> = { '犬': 'dog', '猫': 'cat', 'その他': 'other' };
@@ -344,12 +314,13 @@ export default function AdminScreen() {
           shelter: userPostShelter.trim() || null,
           prefecture: userPostPrefecture.trim() || null,
           source: 'public',
+          user_id: session?.user?.id ?? null,
         })
         .select('id')
         .single();
       if (error) {
         console.error('[submitUserPost] Supabase INSERT エラー:', JSON.stringify(error));
-        Alert.alert('登録エラー', `${error.message}\n\ncode: ${error.code}`);
+        showAlert('登録エラー', `${error.message}\n\ncode: ${error.code}`);
         return;
       }
 
@@ -366,7 +337,7 @@ export default function AdminScreen() {
       await refreshAnimals();
       setUserPostDone(true);
     } catch (e) {
-      Alert.alert('エラー', '登録に失敗しました。時間をおいて再度お試しください。');
+      showAlert('エラー', '登録に失敗しました。時間をおいて再度お試しください。');
     } finally {
       setUserPostSubmitting(false);
     }
@@ -464,7 +435,7 @@ export default function AdminScreen() {
         setAdoptionItems(prev => prev.map(ad =>
           ad.id === adoptionId ? { ...ad, status: 'pending' } : ad
         ));
-        Alert.alert('エラー', updateError.message);
+        showAlert('エラー', updateError.message);
         return;
       }
 
@@ -478,13 +449,13 @@ export default function AdminScreen() {
         });
       }
 
-      Alert.alert(action === 'accepted' ? '受理しました' : '拒否しました');
+      showAlert(action === 'accepted' ? '受理しました' : '拒否しました');
     } catch (e) {
       // 失敗したら元に戻す
       setAdoptionItems(prev => prev.map(ad =>
         ad.id === adoptionId ? { ...ad, status: 'pending' } : ad
       ));
-      Alert.alert('エラー', '処理に失敗しました');
+      showAlert('エラー', '処理に失敗しました');
     } finally {
       setProcessingId(null);
     }
@@ -493,7 +464,7 @@ export default function AdminScreen() {
   const pendingAdoptionsCount = adoptionItems.filter(a => a.status !== 'completed').length;
 
   const markAsTransferred = (animalId: string, animalName: string) => {
-    Alert.alert(
+    showAlert(
       '譲渡済みにする',
       `「${animalName}」を譲渡済みにしますか？\n一覧から削除されます。`,
       [
@@ -507,7 +478,7 @@ export default function AdminScreen() {
               .update({ status: 'transferred' })
               .eq('id', animalId);
             if (error) {
-              Alert.alert('エラー', error.message);
+              showAlert('エラー', error.message);
               return;
             }
             await refreshAnimals();
@@ -524,13 +495,13 @@ export default function AdminScreen() {
         .from('adoptions')
         .update({ status: 'completed' })
         .eq('id', adoptionId);
-      if (error) { Alert.alert('エラー', error.message); return; }
+      if (error) { showAlert('エラー', error.message); return; }
       setAdoptionItems(prev => prev.map(ad =>
         ad.id === adoptionId ? { ...ad, status: 'completed' } : ad
       ));
     } catch (e) {
       console.error('[markContacted] エラー:', e);
-      Alert.alert('エラー', '処理に失敗しました');
+      showAlert('エラー', '処理に失敗しました');
     } finally {
       setProcessingId(null);
     }
@@ -945,12 +916,28 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
                 </View>
 
                 <Text style={styles.fieldLabel}>掲載期限</Text>
-                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowUserDeadlinePicker(true)}>
-                  <Text style={[styles.pickerBtnText, !userPostDeadlineObj && styles.pickerBtnPlaceholder]}>
-                    {userPostDeadlineObj ? formatDate(userPostDeadlineObj) : '選択（任意）'}
-                  </Text>
-                  <Text style={styles.pickerArrow}>📅</Text>
-                </TouchableOpacity>
+                {IS_WEB ? (
+                  <TextInput
+                    style={styles.input}
+                    value={userPostDeadlineObj ? `${userPostDeadlineObj.getFullYear()}-${String(userPostDeadlineObj.getMonth() + 1).padStart(2, '0')}-${String(userPostDeadlineObj.getDate()).padStart(2, '0')}` : ''}
+                    onChangeText={(text) => {
+                      if (!text) { setUserPostDeadlineObj(null); return; }
+                      const d = new Date(text);
+                      if (!isNaN(d.getTime())) setUserPostDeadlineObj(d);
+                    }}
+                    placeholder="YYYY-MM-DD（任意）"
+                    placeholderTextColor="#aaa"
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                ) : (
+                  <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowUserDeadlinePicker(true)}>
+                    <Text style={[styles.pickerBtnText, !userPostDeadlineObj && styles.pickerBtnPlaceholder]}>
+                      {userPostDeadlineObj ? formatDate(userPostDeadlineObj) : '選択（任意）'}
+                    </Text>
+                    <Text style={styles.pickerArrow}>📅</Text>
+                  </TouchableOpacity>
+                )}
 
                 <Text style={styles.fieldLabel}>都道府県</Text>
                 <TextInput style={styles.input} value={userPostPrefecture} onChangeText={setUserPostPrefecture}
@@ -988,7 +975,7 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
                 <TouchableOpacity
                   style={[styles.submitBtn, (!userPostName.trim() || userPostSubmitting) ? styles.submitBtnDisabled : null]}
                   onPress={submitUserPost}
-                  disabled={userPostSubmitting || !userPostName.trim()}
+                  disabled={userPostSubmitting}
                 >
                   {userPostSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitBtnText}>登録して公開する</Text>}
                 </TouchableOpacity>
@@ -997,33 +984,35 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
             )}
           </ScrollView>
 
-          {/* 掲載期限 DatePicker */}
-          <Modal visible={showUserDeadlinePicker} transparent animationType="slide" onRequestClose={() => setShowUserDeadlinePicker(false)}>
-            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowUserDeadlinePicker(false)}>
-              <View style={styles.pickerSheet}>
-                <View style={styles.pickerSheetHeader}>
-                  <Text style={styles.pickerSheetTitle}>掲載期限を選択</Text>
-                  <TouchableOpacity onPress={() => setShowUserDeadlinePicker(false)}>
-                    <Text style={styles.pickerSheetDone}>完了</Text>
-                  </TouchableOpacity>
+          {/* 掲載期限 DatePicker（ネイティブのみ） */}
+          {!IS_WEB && (
+            <Modal visible={showUserDeadlinePicker} transparent animationType="slide" onRequestClose={() => setShowUserDeadlinePicker(false)}>
+              <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowUserDeadlinePicker(false)}>
+                <View style={styles.pickerSheet}>
+                  <View style={styles.pickerSheetHeader}>
+                    <Text style={styles.pickerSheetTitle}>掲載期限を選択</Text>
+                    <TouchableOpacity onPress={() => setShowUserDeadlinePicker(false)}>
+                      <Text style={styles.pickerSheetDone}>完了</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.datePickerContainer}>
+                    <DateTimePicker
+                      value={userPostDeadlineObj ?? new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      locale="ja-JP"
+                      onChange={(_, date) => {
+                        if (Platform.OS !== 'ios') setShowUserDeadlinePicker(false);
+                        if (date) setUserPostDeadlineObj(date);
+                      }}
+                      style={styles.datePicker}
+                      themeVariant="light"
+                    />
+                  </View>
                 </View>
-                <View style={styles.datePickerContainer}>
-                  <DateTimePicker
-                    value={userPostDeadlineObj ?? new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    locale="ja-JP"
-                    onChange={(_, date) => {
-                      if (Platform.OS !== 'ios') setShowUserDeadlinePicker(false);
-                      if (date) setUserPostDeadlineObj(date);
-                    }}
-                    style={styles.datePicker}
-                    themeVariant="light"
-                  />
-                </View>
-              </View>
-            </TouchableOpacity>
-          </Modal>
+              </TouchableOpacity>
+            </Modal>
+          )}
 
           {/* 年齢ピッカーモーダル（一般ユーザー） */}
           <Modal visible={showUserAgePicker} transparent animationType="slide" onRequestClose={() => setShowUserAgePicker(false)}>
@@ -1145,12 +1134,28 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
 
                 {/* 処分期限（登録日は自動で今日の日付がセットされます） */}
                 <Text style={styles.fieldLabel}>処分期限</Text>
-                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowDeadlineDatePicker(true)}>
-                  <Text style={[styles.pickerBtnText, !deadlineDateObj && styles.pickerBtnPlaceholder]}>
-                    {deadlineDateObj ? formatDate(deadlineDateObj) : '選択'}
-                  </Text>
-                  <Text style={styles.pickerArrow}>📅</Text>
-                </TouchableOpacity>
+                {IS_WEB ? (
+                  <TextInput
+                    style={styles.input}
+                    value={deadlineDateObj ? `${deadlineDateObj.getFullYear()}-${String(deadlineDateObj.getMonth() + 1).padStart(2, '0')}-${String(deadlineDateObj.getDate()).padStart(2, '0')}` : ''}
+                    onChangeText={(text) => {
+                      if (!text) { setDeadlineDateObj(null); return; }
+                      const d = new Date(text);
+                      if (!isNaN(d.getTime())) setDeadlineDateObj(d);
+                    }}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#aaa"
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                ) : (
+                  <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowDeadlineDatePicker(true)}>
+                    <Text style={[styles.pickerBtnText, !deadlineDateObj && styles.pickerBtnPlaceholder]}>
+                      {deadlineDateObj ? formatDate(deadlineDateObj) : '選択'}
+                    </Text>
+                    <Text style={styles.pickerArrow}>📅</Text>
+                  </TouchableOpacity>
+                )}
 
                 <Text style={styles.fieldLabel}>保健所</Text>
                 <TouchableOpacity style={styles.shelterSelector} onPress={() => setShowShelterPicker(!showShelterPicker)}>
@@ -1204,7 +1209,7 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
                 />
 
                 <TouchableOpacity style={[styles.submitBtn, (!animalName.trim() || submitting) && styles.submitBtnDisabled]}
-                  onPress={register} disabled={!animalName.trim() || submitting}>
+                  onPress={register} disabled={submitting}>
                   {submitting
                     ? <ActivityIndicator color="white" />
                     : <Text style={styles.submitBtnText}>登録して公開する</Text>
@@ -1267,33 +1272,35 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
             </TouchableOpacity>
           </Modal>
 
-          {/* 処分期限 DatePickerモーダル */}
-          <Modal visible={showDeadlineDatePicker} transparent animationType="slide" onRequestClose={() => setShowDeadlineDatePicker(false)}>
-            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowDeadlineDatePicker(false)}>
-              <View style={styles.pickerSheet}>
-                <View style={styles.pickerSheetHeader}>
-                  <Text style={styles.pickerSheetTitle}>処分期限を選択</Text>
-                  <TouchableOpacity onPress={() => setShowDeadlineDatePicker(false)}>
-                    <Text style={styles.pickerSheetDone}>完了</Text>
-                  </TouchableOpacity>
+          {/* 処分期限 DatePickerモーダル（ネイティブのみ） */}
+          {!IS_WEB && (
+            <Modal visible={showDeadlineDatePicker} transparent animationType="slide" onRequestClose={() => setShowDeadlineDatePicker(false)}>
+              <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowDeadlineDatePicker(false)}>
+                <View style={styles.pickerSheet}>
+                  <View style={styles.pickerSheetHeader}>
+                    <Text style={styles.pickerSheetTitle}>処分期限を選択</Text>
+                    <TouchableOpacity onPress={() => setShowDeadlineDatePicker(false)}>
+                      <Text style={styles.pickerSheetDone}>完了</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.datePickerContainer}>
+                    <DateTimePicker
+                      value={deadlineDateObj ?? new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      locale="ja-JP"
+                      onChange={(_, date) => {
+                        if (Platform.OS !== 'ios') setShowDeadlineDatePicker(false);
+                        if (date) setDeadlineDateObj(date);
+                      }}
+                      style={styles.datePicker}
+                      themeVariant="light"
+                    />
+                  </View>
                 </View>
-                <View style={styles.datePickerContainer}>
-                  <DateTimePicker
-                    value={deadlineDateObj ?? new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    locale="ja-JP"
-                    onChange={(_, date) => {
-                      if (Platform.OS !== 'ios') setShowDeadlineDatePicker(false);
-                      if (date) setDeadlineDateObj(date);
-                    }}
-                    style={styles.datePicker}
-                    themeVariant="light"
-                  />
-                </View>
-              </View>
-            </TouchableOpacity>
-          </Modal>
+              </TouchableOpacity>
+            </Modal>
+          )}
         </View>
       </Modal>
     </View>

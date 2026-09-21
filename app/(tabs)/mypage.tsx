@@ -4,9 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet,
+  ActivityIndicator, Image, Modal, ScrollView, StyleSheet,
   Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { showAlert } from '../../lib/alert';
+import { uploadImageToStorage } from '../../lib/uploadImage';
 import { t } from '../../lib/i18n';
 import { storage, STORAGE_KEYS } from '../../lib/storage';
 import { supabase } from '../../lib/supabase';
@@ -178,21 +180,14 @@ export default function MypageScreen() {
       setDraftPhotoUri(uri);
       setShowAvatarModal(false);
       try {
-        const ext = (uri.split('.').pop()?.split('?')[0] || 'jpg').toLowerCase();
-        const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-        const path = `profile-${Date.now()}.${ext}`;
-        const formData = new FormData();
-        formData.append('file', { uri, name: path, type: mimeType } as any);
-        const { data, error } = await supabase.storage
-          .from('profile-images')
-          .upload(path, formData, { contentType: mimeType, upsert: true });
-        if (error) { Alert.alert('アップロード失敗', error.message); return; }
-        const { data: { publicUrl } } = supabase.storage.from('profile-images').getPublicUrl(data.path);
+        const path = `profile-${Date.now()}.jpg`;
+        const publicUrl = await uploadImageToStorage(uri, 'profile-images', path);
+        if (!publicUrl) { showAlert('アップロード失敗', '写真のアップロードに失敗しました'); return; }
         setDraftAvatar(publicUrl);
         setDraftPhotoUri(publicUrl);
         updateUserProfile({ avatar: publicUrl, photoUri: publicUrl });
       } catch {
-        Alert.alert('エラー', '写真のアップロードに失敗しました');
+        showAlert('エラー', '写真のアップロードに失敗しました');
       }
     }
   };
@@ -203,7 +198,7 @@ export default function MypageScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('位置情報の許可が必要です', '設定から位置情報へのアクセスを許可してください');
+        showAlert('位置情報の許可が必要です', '設定から位置情報へのアクセスを許可してください');
         return;
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -239,14 +234,14 @@ export default function MypageScreen() {
       }
 
       if (dbError) {
-        Alert.alert('保存エラー', dbError.message);
+        showAlert('保存エラー', dbError.message);
         return;
       }
       setUserLocation({ lat, lng });
-      Alert.alert('現在地を更新しました', `緯度 ${lat.toFixed(4)} / 経度 ${lng.toFixed(4)}`);
+      showAlert('現在地を更新しました', `緯度 ${lat.toFixed(4)} / 経度 ${lng.toFixed(4)}`);
     } catch (e) {
       console.error('[getLocation] 例外:', e);
-      Alert.alert('エラー', '位置情報の取得に失敗しました');
+      showAlert('エラー', '位置情報の取得に失敗しました');
     } finally {
       setLocationLoading(false);
     }
@@ -774,12 +769,11 @@ function renderContactModal(
                   body: contactBody,
                 });
                 if (error) {
-                  Alert.alert('送信失敗', 'もう一度お試しください');
+                  showAlert('送信失敗', 'もう一度お試しください');
                 } else {
                   setContactSent(true);
                 }
               }}
-              disabled={!contactName || !contactEmail || !contactBody}
             >
               <Text style={styles.contactSendBtnTxt}>送信する</Text>
             </TouchableOpacity>

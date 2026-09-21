@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '../../lib/navigation';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Dimensions, Image, Modal,
+  ActivityIndicator, Dimensions, Image, Modal,
   ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { showAlert } from '../../lib/alert';
 import { supabase } from '../../lib/supabase';
 import { mapToAnimal, useApp } from '../_appContext';
 
@@ -77,7 +79,7 @@ export default function AnimalDetailScreen() {
       <View style={styles.center}>
         <Text style={styles.notFoundEmoji}>🐾</Text>
         <Text style={styles.notFoundText}>動物が見つかりません</Text>
-        <TouchableOpacity style={styles.notFoundBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.notFoundBtn} onPress={() => goBack(router)}>
           <Text style={styles.notFoundBtnText}>← 一覧に戻る</Text>
         </TouchableOpacity>
       </View>
@@ -88,7 +90,7 @@ export default function AnimalDetailScreen() {
 
   const requireLogin = (action: string) => {
     if (!session) {
-      Alert.alert(
+      showAlert(
         'ログインが必要です',
         `${action}にはログインが必要です`,
         [
@@ -103,7 +105,7 @@ export default function AnimalDetailScreen() {
 
   const submit = async () => {
     if (!applicantName.trim() || !applicantEmail.trim() || !applicantPhone.trim() || !applicantAddress.trim()) {
-      Alert.alert('入力不足', 'お名前・メールアドレス・電話番号・住所は必須です');
+      showAlert('入力不足', 'お名前・メールアドレス・電話番号・住所は必須です');
       return;
     }
     setSubmitting(true);
@@ -119,7 +121,7 @@ export default function AnimalDetailScreen() {
         reason: reason.trim() || null,
         status: 'pending',
       });
-      if (error) { Alert.alert('送信エラー', error.message); return; }
+      if (error) { showAlert('送信エラー', error.message); return; }
       const { error: animalUpdateError } = await supabase
         .from('animals').update({ status: 'pending' }).eq('id', animal.id);
       if (animalUpdateError) {
@@ -130,7 +132,7 @@ export default function AnimalDetailScreen() {
       setSubmitted(true);
       setShowForm(false);
     } catch {
-      Alert.alert('エラーが発生しました', '時間をおいて再度お試しください。');
+      showAlert('エラーが発生しました', '時間をおいて再度お試しください。');
     } finally {
       setSubmitting(false);
     }
@@ -146,12 +148,12 @@ export default function AnimalDetailScreen() {
         reporter_id: session!.user.id,
       });
       if (error) {
-        Alert.alert('エラー', 'もう一度お試しください');
+        showAlert('エラー', 'もう一度お試しください');
       } else {
-        Alert.alert('通報しました', '確認後対応いたします');
+        showAlert('通報しました', '確認後対応いたします');
       }
     };
-    Alert.alert(
+    showAlert(
       '通報',
       '通報の理由を選択してください',
       [
@@ -261,7 +263,7 @@ export default function AnimalDetailScreen() {
           )}
 
           {/* 戻るボタン */}
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack(router)}>
             <Text style={styles.backBtnText}>‹</Text>
           </TouchableOpacity>
 

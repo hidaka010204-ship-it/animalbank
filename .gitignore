@@ -42,3 +42,12 @@ app-example
 # generated native folders
 /ios
 /android
+
+# local tools / build artifacts
+.netlify/
+.claude/
+build_log.txt
+tests/screenshots/
+
+tests/results/
+tests/test.png

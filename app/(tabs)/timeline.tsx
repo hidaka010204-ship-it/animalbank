@@ -1,14 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Easing, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Easing, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
+import { uploadImageToStorage } from '../../lib/uploadImage';
 import { useApp } from '../_appContext';
 
 type Reply = {
@@ -177,7 +178,7 @@ export default function TimelineScreen() {
 
   const requireLogin = (action: string) => {
     if (!session) {
-      Alert.alert(
+      showAlert(
         'ログインが必要です',
         `${action}にはログインが必要です`,
         [
@@ -269,48 +270,15 @@ export default function TimelineScreen() {
   const uploadPostImages = async (uris: string[], postId: string): Promise<string[]> => {
     const urls: string[] = [];
     for (let i = 0; i < uris.length; i++) {
-      try {
-        const uri = uris[i];
-        if (!uri) continue;
-
-        // 1. ImageManipulator で JPEG に変換（変換失敗は catch で捕捉）
-        const converted = await ImageManipulator.manipulateAsync(
-          uri,
-          [],
-          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
-        );
-        console.log(`[uploadPostImages] JPEG変換完了 i=${i} uri=${converted.uri}`);
-
-        // 2. FileSystem で Base64 読み込み → Uint8Array に変換
-        const base64 = await FileSystem.readAsStringAsync(converted.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (!base64 || base64.length === 0) {
-          console.warn(`[uploadPostImages] base64 が空 i=${i}`);
-          continue;
-        }
-        const binaryStr = atob(base64);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let j = 0; j < binaryStr.length; j++) {
-          bytes[j] = binaryStr.charCodeAt(j);
-        }
-        console.log(`[uploadPostImages] ArrayBuffer 作成 i=${i} byteLength=${bytes.byteLength}`);
-
-        // 3. Supabase Storage にアップロード
-        const path = `${postId}/${i}.jpg`;
-        const { data, error } = await supabase.storage
-          .from('post-images')
-          .upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
-
-        if (!error && data) {
-          const { data: { publicUrl } } = supabase.storage.from('post-images').getPublicUrl(data.path);
-          if (publicUrl) urls.push(publicUrl);
-          console.log(`[uploadPostImages] アップロード成功 i=${i} url=${publicUrl}`);
-        } else if (error) {
-          console.warn(`[uploadPostImages] アップロードエラー i=${i}:`, error.message);
-        }
-      } catch (e) {
-        console.warn(`[uploadPostImages] 例外 i=${i}:`, e);
+      const uri = uris[i];
+      if (!uri) continue;
+      const path = `${postId}/${i}.jpg`;
+      const publicUrl = await uploadImageToStorage(uri, 'post-images', path);
+      if (publicUrl) {
+        urls.push(publicUrl);
+        console.log(`[uploadPostImages] 成功 i=${i} url=${publicUrl}`);
+      } else {
+        console.warn(`[uploadPostImages] 失敗 i=${i}`);
       }
     }
     return urls;
@@ -376,12 +344,12 @@ export default function TimelineScreen() {
         reporter_id: session!.user.id,
       });
       if (error) {
-        Alert.alert('エラー', 'もう一度お試しください');
+        showAlert('エラー', 'もう一度お試しください');
       } else {
-        Alert.alert('通報しました', '確認後対応いたします');
+        showAlert('通報しました', '確認後対応いたします');
       }
     };
-    Alert.alert(
+    showAlert(
       '通報',
       '通報の理由を選択してください',
       [
@@ -412,7 +380,7 @@ export default function TimelineScreen() {
   const submitPost = async () => {
     console.log('[submitPost] 開始', { nickname: userProfile.nickname });
     if (!composeText.trim()) {
-      Alert.alert('コメントを入力してください');
+      showAlert('コメントを入力してください');
       return;
     }
     console.log('[submitPost] 開始', { type: composeType, textLen: composeText.trim().length, imageCount: composeImages.length });
@@ -427,18 +395,32 @@ export default function TimelineScreen() {
 
       let postLat: number | null = null;
       let postLng: number | null = null;
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          postLat = pos.coords.latitude;
-          postLng = pos.coords.longitude;
-          console.log('[submitPost] 位置情報取得:', { lat: postLat, lng: postLng });
-        } else {
-          console.log('[submitPost] 位置情報の権限が拒否されました');
+      if (Platform.OS !== 'web') {
+        try {
+          // 権限確認に最大10秒のタイムアウトを設ける（ダイアログが出ない端末対策）
+          const permResult = await Promise.race([
+            Location.requestForegroundPermissionsAsync(),
+            new Promise<{ status: string }>((resolve) =>
+              setTimeout(() => { console.warn('[submitPost] 位置情報権限ダイアログ タイムアウト'); resolve({ status: 'denied' }); }, 10000)
+            ),
+          ]);
+          if (permResult.status === 'granted') {
+            // GPS取得に最大8秒のタイムアウトを設ける（屋内・GPS弱環境対策）
+            const pos = await Promise.race([
+              Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('位置情報取得タイムアウト')), 8000)
+              ),
+            ]);
+            postLat = pos.coords.latitude;
+            postLng = pos.coords.longitude;
+            console.log('[submitPost] 位置情報取得:', { lat: postLat, lng: postLng });
+          } else {
+            console.log('[submitPost] 位置情報の権限が拒否されました（スキップして投稿続行）');
+          }
+        } catch (locErr) {
+          console.warn('[submitPost] 位置情報取得エラー（無視して続行）:', locErr);
         }
-      } catch (locErr) {
-        console.warn('[submitPost] 位置情報取得エラー（無視して続行）:', locErr);
       }
 
       const { data: inserted, error: insertError } = await supabase
@@ -458,7 +440,7 @@ export default function TimelineScreen() {
         .single();
       if (insertError) {
         console.error('[submitPost] INSERT エラー:', insertError);
-        Alert.alert('投稿エラー', insertError.message);
+        showAlert('投稿エラー', insertError.message);
         return;
       }
       console.log('[submitPost] INSERT 成功 id:', inserted?.id);
@@ -477,16 +459,16 @@ export default function TimelineScreen() {
           const { data: updateData, error: updateError } = await updateQuery.select('id, images');
           if (updateError) {
             console.error('[submitPost] 画像URL UPDATE エラー:', updateError);
-            Alert.alert('画像の保存に失敗しました', updateError.message);
+            showAlert('画像の保存に失敗しました', updateError.message);
           } else if (!updateData || updateData.length === 0) {
             console.warn('[submitPost] 画像URL UPDATE が 0 件（RLSまたは条件不一致）');
-            Alert.alert('画像の保存に失敗しました', 'ログイン状態を確認してください。ログインしてから投稿すると画像が保存されます。');
+            showAlert('画像の保存に失敗しました', 'ログイン状態を確認してください。ログインしてから投稿すると画像が保存されます。');
           } else {
             console.log('[submitPost] 画像URL UPDATE 成功', updateData);
           }
         } else {
           console.warn('[submitPost] 全画像のアップロードに失敗しました');
-          Alert.alert('画像のアップロードに失敗しました', '投稿は保存されましたが、画像の添付に失敗しました。');
+          showAlert('画像のアップロードに失敗しました', '投稿は保存されましたが、画像の添付に失敗しました。');
         }
       }
 
@@ -499,7 +481,7 @@ export default function TimelineScreen() {
       await fetchPosts();
     } catch (e) {
       console.error('[submitPost] 予期しないエラー:', e);
-      Alert.alert('エラーが発生しました', '時間をおいて再度お試しください。');
+      showAlert('エラーが発生しました', '時間をおいて再度お試しください。');
     } finally {
       setSubmitting(false);
     }
@@ -572,27 +554,27 @@ export default function TimelineScreen() {
         .eq('user_id', userId!);
 
       if (error) {
-        Alert.alert('更新エラー', error.message);
+        showAlert('更新エラー', error.message);
       } else {
         setEditingPost(null);
         await fetchPosts();
       }
     } catch (e) {
       console.error('[saveEdit] エラー:', e);
-      Alert.alert('エラーが発生しました', '時間をおいて再度お試しください。');
+      showAlert('エラーが発生しました', '時間をおいて再度お試しください。');
     } finally {
       setEditSubmitting(false);
     }
   };
 
   const deletePost = async (postId: string) => {
-    Alert.alert('投稿を削除', 'この投稿を削除しますか？', [
+    showAlert('投稿を削除', 'この投稿を削除しますか？', [
       { text: 'キャンセル', style: 'cancel' },
       {
         text: '削除', style: 'destructive', onPress: async () => {
           const { error } = await supabase.from('posts').delete().eq('id', postId);
           if (error) {
-            Alert.alert('削除エラー', error.message);
+            showAlert('削除エラー', error.message);
           } else {
             setPosts(prev => prev.filter(p => p.id !== postId));
           }
@@ -764,7 +746,7 @@ export default function TimelineScreen() {
       {/* ヘッダー */}
       <LinearGradient colors={['#4FA3A0', '#A8D8CF']} style={styles.header}>
         <Text style={styles.headerTitle}>タイムライン</Text>
-        <TouchableOpacity style={styles.composeBtn} onPress={() => { if (requireLogin('投稿')) setShowCompose(true); }}>
+        <TouchableOpacity style={styles.composeBtn} onPress={() => setShowCompose(true)}>
           <Text style={styles.composeBtnText}>＋ 投稿</Text>
         </TouchableOpacity>
       </LinearGradient>
@@ -792,86 +774,11 @@ export default function TimelineScreen() {
         onEndReachedThreshold={0.3}
         renderItem={renderItem}
         ListHeaderComponent={
-          <>
-            {showCompose && (
-              <View style={styles.composeBox}>
-                <View style={styles.composeHeader}>
-                  <Text style={styles.composeTitle}>📝 新規投稿</Text>
-                  <TouchableOpacity onPress={() => setShowCompose(false)}>
-                    <Text style={styles.composeClose}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.typeRow}>
-                  {types.map(t => (
-                    <TouchableOpacity key={t.key} onPress={() => setComposeType(t.key)}
-                      style={[styles.typeBtn, composeType === t.key && styles.typeBtnActive]}>
-                      <Text style={[styles.typeBtnText, composeType === t.key && styles.typeBtnTextActive]}>{t.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <View style={styles.locationRow}>
-                  <TextInput
-                    style={[styles.locationInput, { flex: 1 }]}
-                    value={composePrefecture}
-                    onChangeText={setComposePrefecture}
-                    placeholder="都道府県（例：岐阜県）"
-                    placeholderTextColor="#aaa"
-                  />
-                  <TextInput
-                    style={[styles.locationInput, { flex: 1.4 }]}
-                    value={composeCity}
-                    onChangeText={setComposeCity}
-                    placeholder="市区町村（例：中津川市）"
-                    placeholderTextColor="#aaa"
-                  />
-                </View>
-
-                <TextInput
-                  style={styles.composeInput}
-                  value={composeText}
-                  onChangeText={setComposeText}
-                  placeholder="内容を入力してください..."
-                  placeholderTextColor="#999"
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-
-                {composeImages.length > 0 && (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.previewScroll}>
-                    {composeImages.map((uri, i) => (
-                      <View key={i} style={styles.previewWrap}>
-                        <Image source={{ uri }} style={styles.previewImg} />
-                        <TouchableOpacity style={styles.removeBtn} onPress={() => setComposeImages(prev => prev.filter((_, j) => j !== i))}>
-                          <Text style={styles.removeBtnText}>✕</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </ScrollView>
-                )}
-
-                <View style={styles.composeActions}>
-                  <TouchableOpacity style={styles.photoBtn} onPress={pickComposeImages}>
-                    <Text style={styles.photoBtnText}>📷 写真</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.submitBtn, (!composeText.trim() || submitting) ? styles.submitBtnDisabled : null]}
-                    onPress={submitPost}
-                    disabled={submitting || !composeText.trim()}
-                  >
-                    {submitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitBtnText}>投稿する</Text>}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-            {loading && (
-              <View style={styles.loadingBox}>
-                <ActivityIndicator color="#A8D8CF" />
-              </View>
-            )}
-          </>
+          loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator color="#A8D8CF" />
+            </View>
+          ) : null
         }
         ListEmptyComponent={!loading ? (
           <View style={styles.empty}>
@@ -1009,6 +916,89 @@ export default function TimelineScreen() {
         </TouchableOpacity>
       </Modal>
       )}
+
+      {/* 新規投稿フォーム */}
+      <Modal visible={showCompose} animationType="slide" transparent onRequestClose={() => setShowCompose(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.composeOverlay}
+        >
+          <View style={styles.composeSheet}>
+            <View style={styles.composeHeader}>
+              <Text style={styles.composeTitle}>📝 新規投稿</Text>
+              <TouchableOpacity onPress={() => setShowCompose(false)}>
+                <Text style={styles.composeClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View style={styles.typeRow}>
+                {types.map(t => (
+                  <TouchableOpacity key={t.key} onPress={() => setComposeType(t.key)}
+                    style={[styles.typeBtn, composeType === t.key && styles.typeBtnActive]}>
+                    <Text style={[styles.typeBtnText, composeType === t.key && styles.typeBtnTextActive]}>{t.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={styles.locationRow}>
+                <TextInput
+                  style={[styles.locationInput, { flex: 1 }]}
+                  value={composePrefecture}
+                  onChangeText={setComposePrefecture}
+                  placeholder="都道府県（例：岐阜県）"
+                  placeholderTextColor="#aaa"
+                />
+                <TextInput
+                  style={[styles.locationInput, { flex: 1.4 }]}
+                  value={composeCity}
+                  onChangeText={setComposeCity}
+                  placeholder="市区町村（例：中津川市）"
+                  placeholderTextColor="#aaa"
+                />
+              </View>
+
+              <TextInput
+                style={styles.composeInput}
+                value={composeText}
+                onChangeText={setComposeText}
+                placeholder="内容を入力してください..."
+                placeholderTextColor="#999"
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+
+              {composeImages.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.previewScroll}>
+                  {composeImages.map((uri, i) => (
+                    <View key={i} style={styles.previewWrap}>
+                      <Image source={{ uri }} style={styles.previewImg} />
+                      <TouchableOpacity style={styles.removeBtn} onPress={() => setComposeImages(prev => prev.filter((_, j) => j !== i))}>
+                        <Text style={styles.removeBtnText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+
+              <View style={styles.composeActions}>
+                <TouchableOpacity style={styles.photoBtn} onPress={pickComposeImages}>
+                  <Text style={styles.photoBtnText}>📷 写真</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.submitBtn, (!composeText.trim() || submitting) ? styles.submitBtnDisabled : null]}
+                  onPress={submitPost}
+                  disabled={submitting}
+                >
+                  {submitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitBtnText}>投稿する</Text>}
+                </TouchableOpacity>
+              </View>
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -1036,7 +1026,8 @@ const styles = StyleSheet.create({
   list: { flex: 1 },
 
   // 投稿フォーム
-  composeBox: { backgroundColor: 'white', margin: 12, borderRadius: 20, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 10, elevation: 3 },
+  composeOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  composeSheet: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 0, maxHeight: Dimensions.get('window').height * 0.8, flexShrink: 1 },
   composeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   composeTitle: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
   composeClose: { fontSize: 17, color: '#bbb', padding: 2 },
