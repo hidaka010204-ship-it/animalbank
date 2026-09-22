@@ -1,5 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { Menu, SlidersHorizontal } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Animated, Dimensions, Easing, Image, Modal,
@@ -246,7 +247,9 @@ export default function HomeScreen() {
             />
           </View>
           <TouchableOpacity style={[styles.sqBtn, showFilter && styles.sqBtnGreen]} onPress={() => setShowFilter(!showFilter)}>
-            <Text style={styles.sqBtnTxt}>{hasFilter ? '🔧' : '☰'}</Text>
+            {hasFilter
+              ? <SlidersHorizontal size={20} color="#2D4A47" />
+              : <Menu size={20} color="#666" />}
           </TouchableOpacity>
           <TouchableOpacity style={[styles.sqBtn, showFavOnly && styles.sqBtnRed]} onPress={() => setShowFavOnly(!showFavOnly)}>
             <Text style={styles.sqBtnTxt}>{showFavOnly ? '❤️' : '🤍'}</Text>

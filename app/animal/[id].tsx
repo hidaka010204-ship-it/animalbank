@@ -1,10 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Send, User } from 'lucide-react-native';
 import { goBack } from '../../lib/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Dimensions, Image, Modal,
+  ActivityIndicator, Animated, Dimensions, Image, Modal, Platform,
   ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { showAlert } from '../../lib/alert';
@@ -12,7 +12,7 @@ import { supabase } from '../../lib/supabase';
 import { mapToAnimal, useApp } from '../_appContext';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const HERO_H = Math.round(SW * 0.9);
+const HERO_H = Math.min(Math.round(SW * 0.75), Math.round(SH * 0.5));
 
 export default function AnimalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -65,6 +65,8 @@ export default function AnimalDetailScreen() {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [imgLoading, setImgLoading] = useState<Record<number, boolean>>({});
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState('');
+  const toastOpacity = useRef(new Animated.Value(0)).current;
 
   if (loading || localLoading) {
     return (
@@ -168,6 +170,15 @@ export default function AnimalDetailScreen() {
     );
   };
 
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    toastOpacity.setValue(1);
+    Animated.sequence([
+      Animated.delay(1500),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  };
+
   const handleShare = async () => {
     const deepLink = `https://animalbank.expo.dev/animal/${animal.id}`;
     const kindGender = [animal.animalKind, animal.gender].filter(Boolean).join('/');
@@ -180,11 +191,19 @@ export default function AnimalDetailScreen() {
       '',
       deepLink,
     ].filter((line, i) => i === 4 || Boolean(line)).join('\n');
+    if (Platform.OS === 'web') {
+      if (typeof navigator !== 'undefined' && (navigator as any).share) {
+        try { await (navigator as any).share({ text: message }); return; } catch {}
+      }
+      try {
+        await navigator.clipboard?.writeText(message);
+        showToast('クリップボードにコピーしました');
+      } catch {}
+      return;
+    }
     try {
       await Share.share({ message });
-    } catch {
-      // キャンセルまたはエラー
-    }
+    } catch {}
   };
 
   const kindColor = animal.animalKind === '犬'
@@ -219,7 +238,7 @@ export default function AnimalDetailScreen() {
                     <Image
                       source={{ uri }}
                       style={{ width: SW, height: HERO_H }}
-                      resizeMode="cover"
+                      resizeMode="contain"
                       onLoadStart={() => setImgLoading(p => ({ ...p, [i]: true }))}
                       onLoadEnd={() => setImgLoading(p => ({ ...p, [i]: false }))}
                     />
@@ -282,7 +301,7 @@ export default function AnimalDetailScreen() {
 
           {/* シェアボタン */}
           <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.8}>
-            <Ionicons name="paper-plane-outline" size={22} color="rgba(255,255,255,0.9)" />
+            <Send size={20} color="rgba(255,255,255,0.9)" />
           </TouchableOpacity>
 
           {/* 通報ボタン */}
@@ -342,7 +361,7 @@ export default function AnimalDetailScreen() {
             <View style={styles.grid}>
               {!!animal.gender && (
                 <View style={styles.gridItem}>
-                  <Text style={styles.gridIcon}>⚧</Text>
+                  <User size={22} color="#4FA3A0" />
                   <Text style={styles.gridLabel}>性別</Text>
                   <Text style={styles.gridValue}>{animal.gender}</Text>
                 </View>
@@ -560,6 +579,13 @@ export default function AnimalDetailScreen() {
 
         <View style={{ height: 56 }} />
       </ScrollView>
+
+      {/* トースト通知 */}
+      {!!toastMsg && (
+        <Animated.View style={[styles.toast, { opacity: toastOpacity }]} pointerEvents="none">
+          <Text style={styles.toastText}>{toastMsg}</Text>
+        </Animated.View>
+      )}
 
       {/* フルスクリーン lightbox */}
       {!!lightboxUri && (
@@ -790,6 +816,14 @@ const styles = StyleSheet.create({
     shadowColor: '#4FA3A0', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3,
   },
   loginPromptBtnTxt: { color: 'white', fontSize: 14, fontWeight: '800' },
+
+  // トースト
+  toast: {
+    position: 'absolute', bottom: 80, alignSelf: 'center',
+    backgroundColor: 'rgba(30,30,30,0.85)', paddingHorizontal: 20, paddingVertical: 10,
+    borderRadius: 24, zIndex: 100,
+  },
+  toastText: { color: 'white', fontSize: 13, fontWeight: '600' },
 
   // lightbox
   lightboxOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.93)', alignItems: 'center', justifyContent: 'center' },
