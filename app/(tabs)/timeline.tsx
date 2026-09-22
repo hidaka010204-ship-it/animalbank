@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Heart, Send } from 'lucide-react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -197,6 +197,9 @@ export default function TimelineScreen() {
   const offsetRef = useRef(0);
   const [submitting, setSubmitting] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [menuPostId, setMenuPostId] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState('');
+  const toastOpacity = useRef(new Animated.Value(0)).current;
 
   // 投稿フォーム
   const [showCompose, setShowCompose] = useState(false);
@@ -247,10 +250,34 @@ export default function TimelineScreen() {
       console.error('[fetchPosts] エラー:', error);
     } else {
       const newPosts = (data ?? []).map(row => mapToPost(row as Record<string, unknown>));
+
+      // likes カウントとユーザーのいいね状態を取得
+      const postIds = newPosts.map(p => p.id);
+      let likeCountMap: Record<string, number> = {};
+      let likedSet = new Set<string>();
+      if (postIds.length > 0) {
+        const { data: likesData } = await supabase
+          .from('post_likes').select('post_id').in('post_id', postIds);
+        (likesData ?? []).forEach((l: any) => {
+          likeCountMap[l.post_id] = (likeCountMap[l.post_id] || 0) + 1;
+        });
+        if (session?.user?.id) {
+          const { data: userLikes } = await supabase
+            .from('post_likes').select('post_id')
+            .in('post_id', postIds).eq('user_id', session.user.id);
+          likedSet = new Set((userLikes ?? []).map((l: any) => l.post_id as string));
+        }
+      }
+      const postsWithLikes = newPosts.map(p => ({
+        ...p,
+        likes: likeCountMap[p.id] || 0,
+        liked: likedSet.has(p.id),
+      }));
+
       if (reset) {
-        setPosts(newPosts);
+        setPosts(postsWithLikes);
       } else {
-        setPosts(prev => [...prev, ...newPosts]);
+        setPosts(prev => [...prev, ...postsWithLikes]);
       }
       offsetRef.current = from + newPosts.length;
       setHasMore(newPosts.length === PAGE_SIZE);
@@ -265,7 +292,7 @@ export default function TimelineScreen() {
     fetchPosts(false);
   };
 
-  useEffect(() => { fetchPosts(true); }, []);
+  useEffect(() => { fetchPosts(true); }, [session?.user?.id]);
 
   const uploadPostImages = async (uris: string[], postId: string): Promise<string[]> => {
     const urls: string[] = [];
@@ -362,6 +389,15 @@ export default function TimelineScreen() {
     );
   };
 
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    toastOpacity.setValue(1);
+    Animated.sequence([
+      Animated.delay(1500),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  };
+
   const handleSharePost = async (post: Post) => {
     const badge = badges[post.type];
     const lines = [
@@ -370,11 +406,20 @@ export default function TimelineScreen() {
       post.text,
       '#あにまるバンク',
     ].filter(Boolean);
-    try {
-      await Share.share({ message: lines.join('\n') });
-    } catch {
-      // キャンセルまたはエラー
+    const text = lines.join('\n');
+    if (Platform.OS === 'web') {
+      if (typeof navigator !== 'undefined' && (navigator as any).share) {
+        try { await (navigator as any).share({ text }); return; } catch {}
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('リンクをコピーしました');
+      } catch {}
+      return;
     }
+    try {
+      await Share.share({ message: text });
+    } catch {}
   };
 
   const submitPost = async () => {
@@ -487,10 +532,20 @@ export default function TimelineScreen() {
     }
   };
 
-  const toggleLike = (id: string) => {
-    setPosts(prev => prev.map(p =>
-      p.id === id ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 } : p
-    ));
+  const toggleLike = async (id: string) => {
+    if (!requireLogin('いいね')) return;
+    const post = posts.find(p => p.id === id);
+    if (!post) return;
+    const newLiked = !post.liked;
+    const newCount = newLiked ? post.likes + 1 : post.likes - 1;
+    setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: newLiked, likes: newCount } : p));
+    if (newLiked) {
+      const { error } = await supabase.from('post_likes').insert({ post_id: id, user_id: session!.user.id });
+      if (error) setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !newLiked, likes: post.likes } : p));
+    } else {
+      const { error } = await supabase.from('post_likes').delete().eq('post_id', id).eq('user_id', session!.user.id);
+      if (error) setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !newLiked, likes: post.likes } : p));
+    }
   };
 
   const toggleReplies = (id: string) => {
@@ -633,19 +688,31 @@ export default function TimelineScreen() {
             {post.text ? <Text style={styles.itemText}>{post.text}</Text> : null}
 
             {post.images.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageScroll}>
-                {post.images.map((uri, i) => (
-                  <TouchableOpacity key={i} onPress={() => setLightboxUri(uri)} activeOpacity={0.85}>
-                    <ExpoImage
-                      source={{ uri }}
-                      style={styles.postImg}
-                      contentFit="cover"
-                      priority="high"
-                      cachePolicy="memory-disk"
-                    />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              post.images.length === 1 ? (
+                <TouchableOpacity onPress={() => setLightboxUri(post.images[0])} activeOpacity={0.85} style={{ marginTop: 8 }}>
+                  <ExpoImage
+                    source={{ uri: post.images[0] }}
+                    style={styles.postImgFull}
+                    contentFit="cover"
+                    priority="high"
+                    cachePolicy="memory-disk"
+                  />
+                </TouchableOpacity>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageScroll}>
+                  {post.images.map((uri, i) => (
+                    <TouchableOpacity key={i} onPress={() => setLightboxUri(uri)} activeOpacity={0.85}>
+                      <ExpoImage
+                        source={{ uri }}
+                        style={styles.postImgMulti}
+                        contentFit="cover"
+                        priority="high"
+                        cachePolicy="memory-disk"
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )
             )}
 
             {badge && (
@@ -656,7 +723,7 @@ export default function TimelineScreen() {
 
             <View style={styles.actions}>
               <TouchableOpacity style={styles.actionBtn} onPress={() => toggleLike(post.id)}>
-                <Text style={styles.actionIcon}>{post.liked ? '❤️' : '🤍'}</Text>
+                <Heart size={17} color={post.liked ? '#E24B4A' : '#aaa'} fill={post.liked ? '#E24B4A' : 'none'} />
                 <Text style={[styles.actionCount, post.liked && styles.actionCountLiked]}>{post.likes}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionBtn} onPress={() => toggleReplies(post.id)}>
@@ -664,17 +731,12 @@ export default function TimelineScreen() {
                 <Text style={styles.actionCount}>{post.replies.length}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionBtn} onPress={() => handleSharePost(post)}>
-                <Ionicons name="paper-plane-outline" size={17} color="#aaa" />
+                <Send size={17} color="#aaa" />
               </TouchableOpacity>
               {session?.user?.id && post.user_id === session.user.id && (
-                <>
-                  <TouchableOpacity style={styles.actionBtn} onPress={() => openEdit(post)}>
-                    <Text style={styles.actionIcon}>✏️</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.actionBtn} onPress={() => deletePost(post.id)}>
-                    <Text style={styles.actionIcon}>🗑️</Text>
-                  </TouchableOpacity>
-                </>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => setMenuPostId(post.id)}>
+                  <Text style={styles.menuDots}>•••</Text>
+                </TouchableOpacity>
               )}
             </View>
           </View>
@@ -746,7 +808,7 @@ export default function TimelineScreen() {
       {/* ヘッダー */}
       <LinearGradient colors={['#4FA3A0', '#A8D8CF']} style={styles.header}>
         <Text style={styles.headerTitle}>タイムライン</Text>
-        <TouchableOpacity style={styles.composeBtn} onPress={() => setShowCompose(true)}>
+        <TouchableOpacity style={styles.composeBtn} onPress={() => { if (!requireLogin('投稿')) return; setShowCompose(true); }}>
           <Text style={styles.composeBtnText}>＋ 投稿</Text>
         </TouchableOpacity>
       </LinearGradient>
@@ -917,6 +979,34 @@ export default function TimelineScreen() {
       </Modal>
       )}
 
+      {/* 投稿メニュー（自分の投稿のみ） */}
+      {menuPostId != null && (
+        <Modal transparent animationType="fade" visible onRequestClose={() => setMenuPostId(null)}>
+          <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setMenuPostId(null)}>
+            <View style={styles.menuSheet}>
+              <TouchableOpacity style={styles.menuItem} onPress={() => {
+                const p = posts.find(x => x.id === menuPostId);
+                setMenuPostId(null);
+                if (p) openEdit(p);
+              }}>
+                <Text style={styles.menuItemText}>編集</Text>
+              </TouchableOpacity>
+              <View style={styles.menuDivider} />
+              <TouchableOpacity style={styles.menuItem} onPress={() => {
+                const pid = menuPostId!;
+                setMenuPostId(null);
+                deletePost(pid);
+              }}>
+                <Text style={styles.menuItemTextDanger}>削除</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+      <Animated.View style={[styles.toast, { opacity: toastOpacity }]} pointerEvents="none">
+        <Text style={styles.toastText}>{toastMsg}</Text>
+      </Animated.View>
+
       {/* 新規投稿フォーム */}
       <Modal visible={showCompose} animationType="slide" transparent onRequestClose={() => setShowCompose(false)}>
         <KeyboardAvoidingView
@@ -1070,6 +1160,8 @@ const styles = StyleSheet.create({
   itemText: { fontSize: 14, color: '#333', lineHeight: 21 },
   imageScroll: { marginTop: 8 },
   postImg: { width: 120, height: 120, borderRadius: 12, marginRight: 7 },
+  postImgFull: { width: '100%', aspectRatio: 4 / 3, borderRadius: 12 } as any,
+  postImgMulti: { width: 160, height: 120, borderRadius: 12, marginRight: 7 },
   badge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginTop: 8 },
   badgeText: { fontSize: 11, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 18, marginTop: 10, paddingBottom: 4 },
@@ -1112,6 +1204,18 @@ const styles = StyleSheet.create({
   editBottomActions: { flexDirection: 'row', gap: 8, paddingTop: 10, paddingBottom: 20, borderTopWidth: 0.5, borderTopColor: '#EDE8E0' },
   kbDoneBtn: { backgroundColor: '#D4EEE9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   kbDoneBtnText: { fontSize: 12, color: '#2D4A47', fontWeight: '700' },
+
+  // 投稿メニュー
+  menuDots: { fontSize: 15, color: '#bbb', letterSpacing: 1, lineHeight: 17 },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
+  menuSheet: { backgroundColor: 'white', borderRadius: 14, width: 200, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
+  menuItem: { paddingVertical: 14, paddingHorizontal: 18, alignItems: 'center' },
+  menuDivider: { height: 0.5, backgroundColor: '#EDE8E0' },
+  menuItemText: { fontSize: 14, color: '#333', fontWeight: '500' },
+  menuItemTextDanger: { fontSize: 14, color: '#E24B4A', fontWeight: '500' },
+  // トースト
+  toast: { position: 'absolute', bottom: 80, left: 0, right: 0, alignItems: 'center' },
+  toastText: { backgroundColor: 'rgba(0,0,0,0.75)', color: 'white', fontSize: 13, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
 
   // フルスクリーン画像モーダル
   lightboxOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
