@@ -64,6 +64,7 @@ export default function NotificationsScreen() {
     const { error } = await supabase
       .from('notifications')
       .update({ is_read: true })
+      .eq('user_id', session.user.id)
       .in('id', unreadIds);
     if (error) {
       console.error('[Notifications] 既読更新エラー:', error);

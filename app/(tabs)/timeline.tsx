@@ -363,12 +363,14 @@ export default function TimelineScreen() {
 
   const handleReportPost = (postId: string) => {
     if (!requireLogin('通報')) return;
+    const uid = session?.user?.id;
+    if (!uid) return;
     const submit = async (reason: string) => {
       const { error } = await supabase.from('reports').insert({
         target_type: 'post',
         target_id: postId,
         reason,
-        reporter_id: session!.user.id,
+        reporter_id: uid,
       });
       if (error) {
         showAlert('エラー', 'もう一度お試しください');
@@ -412,7 +414,7 @@ export default function TimelineScreen() {
         try { await (navigator as any).share({ text }); return; } catch {}
       }
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard?.writeText(text);
         showToast('リンクをコピーしました');
       } catch {}
       return;
@@ -424,6 +426,10 @@ export default function TimelineScreen() {
 
   const submitPost = async () => {
     console.log('[submitPost] 開始', { nickname: userProfile.nickname });
+    if (!session?.user?.id) {
+      showAlert('ログインが必要です', '投稿するにはログインしてください。');
+      return;
+    }
     if (!composeText.trim()) {
       showAlert('コメントを入力してください');
       return;
@@ -534,16 +540,18 @@ export default function TimelineScreen() {
 
   const toggleLike = async (id: string) => {
     if (!requireLogin('いいね')) return;
+    const uid = session?.user?.id;
+    if (!uid) return;
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newLiked = !post.liked;
     const newCount = newLiked ? post.likes + 1 : post.likes - 1;
     setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: newLiked, likes: newCount } : p));
     if (newLiked) {
-      const { error } = await supabase.from('post_likes').insert({ post_id: id, user_id: session!.user.id });
+      const { error } = await supabase.from('post_likes').insert({ post_id: id, user_id: uid });
       if (error) setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !newLiked, likes: post.likes } : p));
     } else {
-      const { error } = await supabase.from('post_likes').delete().eq('post_id', id).eq('user_id', session!.user.id);
+      const { error } = await supabase.from('post_likes').delete().eq('post_id', id).eq('user_id', uid);
       if (error) setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !newLiked, likes: post.likes } : p));
     }
   };
@@ -580,9 +588,13 @@ export default function TimelineScreen() {
 
   const saveEdit = async () => {
     if (!editingPost) return;
+    const userId = session?.user?.id;
+    if (!userId) {
+      showAlert('セッション切れです', '再度ログインしてください。');
+      return;
+    }
     setEditSubmitting(true);
     try {
-      const userId = session?.user?.id ?? null;
 
       // 既存URLとローカル新規画像を分離
       const existingUrls = editImages.filter(uri => uri.startsWith('http'));
@@ -606,7 +618,7 @@ export default function TimelineScreen() {
           images: finalImages.length > 0 ? finalImages : null,
         })
         .eq('id', editingPost.id)
-        .eq('user_id', userId!);
+        .eq('user_id', userId);
 
       if (error) {
         showAlert('更新エラー', error.message);

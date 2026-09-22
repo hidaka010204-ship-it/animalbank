@@ -122,8 +122,8 @@ export default function AnimalDetailScreen() {
         status: 'pending',
       });
       if (error) { showAlert('送信エラー', error.message); return; }
-      const { error: animalUpdateError } = await supabase
-        .from('animals').update({ status: 'pending' }).eq('id', animal.id);
+      const { error: animalUpdateError } = animal.status === 'available' ? await supabase
+        .from('animals').update({ status: 'pending' }).eq('id', animal.id) : { error: null };
       if (animalUpdateError) {
         console.error('[submit] animals UPDATE エラー:', animalUpdateError);
       } else {
@@ -140,12 +140,14 @@ export default function AnimalDetailScreen() {
 
   const handleReport = () => {
     if (!requireLogin('通報')) return;
+    const uid = session?.user?.id;
+    if (!uid) return;
     const submit = async (reason: string) => {
       const { error } = await supabase.from('reports').insert({
         target_type: 'animal',
         target_id: animal!.id,
         reason,
-        reporter_id: session!.user.id,
+        reporter_id: uid,
       });
       if (error) {
         showAlert('エラー', 'もう一度お試しください');

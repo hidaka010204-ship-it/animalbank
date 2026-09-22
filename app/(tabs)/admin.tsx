@@ -450,6 +450,7 @@ export default function AdminScreen() {
       }
 
       showAlert(action === 'accepted' ? '受理しました' : '拒否しました');
+      fetchAdoptions();
     } catch (e) {
       // 失敗したら元に戻す
       setAdoptionItems(prev => prev.map(ad =>

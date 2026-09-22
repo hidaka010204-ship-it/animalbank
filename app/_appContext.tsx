@@ -714,10 +714,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const fetchUserLatLng = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('profiles')
-      .select('lat, lng')
+      .select('lat, lng, is_admin')
       .eq('id', userId)
       .single();
     if (data) {
+      setIsAdminLoggedIn(!!data.is_admin);
       setUserProfile(prev => ({
         ...prev,
         lat: typeof data.lat === 'number' ? data.lat : undefined,
@@ -733,7 +734,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session?.user?.id) fetchUserLatLng(session.user.id);
+      if (session?.user?.id) {
+        fetchUserLatLng(session.user.id);
+      } else {
+        setIsAdminLoggedIn(false);
+      }
     });
     return () => subscription.unsubscribe();
   }, [fetchUserLatLng]);
@@ -754,12 +759,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const adminLogin = (password: string): boolean => {
-    if (password === 'shelter2024') {
-      setIsAdminLoggedIn(true);
-      return true;
-    }
-    return false;
+  const adminLogin = (_password: string): boolean => {
+    return isAdminLoggedIn;
   };
 
   const adminLogout = () => setIsAdminLoggedIn(false);
