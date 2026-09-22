@@ -351,10 +351,13 @@ export default function HomeScreen() {
               {!!(animal.age || animal.weight) && (
                 <Text style={styles.cardMeta}>{[animal.age, animal.weight].filter(Boolean).join(' · ')}</Text>
               )}
-              <Text style={styles.cardShelter} numberOfLines={1}>📍 {animal.shelter}</Text>
+              {!!(animal.prefecture || animal.shelter) && (
+                <Text style={styles.cardLocation} numberOfLines={1}>
+                  📍 {[animal.prefecture, animal.shelter].filter(Boolean).join('  ')}
+                </Text>
+              )}
               <View style={styles.pillRow}>
                 {animal.urgent && <View style={styles.pillRed}><Text style={styles.pillRedTxt}>🚨 緊急</Text></View>}
-                {!!animal.prefecture && <View style={styles.pillBlue}><Text style={styles.pillBlueTxt}>{animal.prefecture}</Text></View>}
                 {animal.animalKind !== 'その他' && (
                   <View style={styles.pillGray}>
                     <Text style={styles.pillGrayTxt}>{animal.animalKind === '犬' ? '🐕 犬' : '🐈 猫'}</Text>
@@ -506,7 +509,9 @@ export default function HomeScreen() {
                         <View style={{ flex: 1 }}>
                           <Text style={styles.urgentCardName}>{animal.name}</Text>
                           <Text style={styles.urgentCardBreed}>{animal.breed} · {animal.age}</Text>
-                          <Text style={styles.urgentCardShelter}>📍 {animal.shelter}</Text>
+                          <Text style={styles.urgentCardShelter} numberOfLines={1}>
+                            📍 {[animal.prefecture, animal.shelter].filter(Boolean).join('  ')}
+                          </Text>
                           {!!animal.deadline && <Text style={styles.urgentCardDeadline}>{animal.deadline}</Text>}
                         </View>
                       </View>
@@ -702,6 +707,7 @@ const styles = StyleSheet.create({
   cardBreed: { fontSize: 12, color: '#666', marginBottom: 2 },
   cardMeta: { fontSize: 12, color: '#999', marginBottom: 4 },
   cardShelter: { fontSize: 11, color: '#bbb', marginBottom: 8 },
+  cardLocation: { fontSize: 12, color: '#555', marginBottom: 7, fontWeight: '500' },
   pillRow: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
   pillRed: { backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   pillRedTxt: { fontSize: 10, color: '#DC2626', fontWeight: '700' },
