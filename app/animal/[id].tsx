@@ -12,7 +12,6 @@ import { supabase } from '../../lib/supabase';
 import { mapToAnimal, useApp } from '../_appContext';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const HERO_H = Math.min(Math.round(SW * 0.75), Math.round(SH * 0.5));
 
 export default function AnimalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -67,6 +66,9 @@ export default function AnimalDetailScreen() {
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState('');
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  // Web では window幅≠コンテナ幅になるので onLayout で実際の幅を取る
+  const [heroW, setHeroW] = useState(Platform.OS === 'web' ? Math.min(SW, 430) : SW);
+  const heroH = Math.min(Math.round(heroW * 0.75), Math.round(SH * 0.5));
 
   if (loading || localLoading) {
     return (
@@ -220,24 +222,27 @@ export default function AnimalDetailScreen() {
       <ScrollView style={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
         {/* ── ヒーロー写真エリア ── */}
-        <View style={{ height: HERO_H, backgroundColor: '#111' }}>
+        <View
+          style={{ width: '100%' as any, height: heroH, backgroundColor: animal.images.length > 0 ? '#111' : '#EAEEEC' }}
+          onLayout={(e) => { const w = e.nativeEvent.layout.width; if (w > 0 && w !== heroW) setHeroW(w); }}
+        >
           {animal.images.length > 0 ? (
             <>
               <ScrollView
                 horizontal pagingEnabled
                 showsHorizontalScrollIndicator={false}
-                onScroll={e => setCurrentPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / SW))}
+                onScroll={e => setCurrentPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / heroW))}
                 scrollEventThrottle={16}
-                style={{ height: HERO_H }}
+                style={{ width: heroW, height: heroH }}
               >
                 {animal.images.map((uri, i) => (
                   <TouchableOpacity
-                    key={i} style={{ width: SW, height: HERO_H }}
+                    key={i} style={{ width: heroW, height: heroH }}
                     onPress={() => setLightboxUri(uri)} activeOpacity={0.95}
                   >
                     <Image
                       source={{ uri }}
-                      style={{ width: SW, height: HERO_H }}
+                      style={{ width: heroW, height: heroH }}
                       resizeMode="contain"
                       onLoadStart={() => setImgLoading(p => ({ ...p, [i]: true }))}
                       onLoadEnd={() => setImgLoading(p => ({ ...p, [i]: false }))}
@@ -249,15 +254,12 @@ export default function AnimalDetailScreen() {
                 ))}
               </ScrollView>
 
-              {/* 下グラデーション + 名前 */}
+              {/* 下グラデーション（ドット視認性向上のみ、テキストなし） */}
               <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.78)']}
+                colors={['transparent', 'rgba(0,0,0,0.45)']}
                 style={styles.heroGradient}
                 pointerEvents="none"
-              >
-                <Text style={styles.heroName}>{animal.name}</Text>
-                {!!animal.breed && <Text style={styles.heroBreed}>{animal.breed}</Text>}
-              </LinearGradient>
+              />
 
               {/* ページドット */}
               {animal.images.length > 1 && (
@@ -270,17 +272,12 @@ export default function AnimalDetailScreen() {
             </>
           ) : (
             /* 写真なしプレースホルダー */
-            <LinearGradient
-              colors={[themeColor, '#A8D8CF', '#C8E8E3']}
-              start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }}
-              style={[StyleSheet.absoluteFill, styles.heroPlaceholder]}
-            >
+            <View style={[StyleSheet.absoluteFill, styles.heroPlaceholder]}>
               <View style={styles.heroEmojiWrap}>
                 <Text style={styles.heroEmoji}>{animal.emoji}</Text>
               </View>
-              <Text style={styles.heroName}>{animal.name}</Text>
-              {!!animal.breed && <Text style={styles.heroBreed}>{animal.breed}</Text>}
-            </LinearGradient>
+              <Text style={styles.heroNoPhotoText}>写真なし</Text>
+            </View>
           )}
 
           {/* 戻るボタン */}
@@ -315,6 +312,11 @@ export default function AnimalDetailScreen() {
         {/* ── 名前 + バッジカード（ヒーローに重ねる） ── */}
         <View style={styles.nameCard}>
           <Text style={styles.animalName}>{animal.name}</Text>
+          {!!(animal.prefecture || animal.shelter) && (
+            <Text style={styles.nameCardLocation} numberOfLines={1}>
+              📍 {[animal.prefecture, animal.shelter].filter(Boolean).join('  ')}
+            </Text>
+          )}
 
           <View style={styles.badgeRow}>
             <View style={[styles.badge, { backgroundColor: kindColor.bg }]}>
@@ -616,21 +618,20 @@ const styles = StyleSheet.create({
   // ── ヒーロー ──
   heroGradient: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 20, paddingTop: 70, paddingBottom: 44,
+    height: 60,
   },
-  heroPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 14 },
+  heroPlaceholder: {
+    alignItems: 'center', justifyContent: 'center', gap: 10,
+    backgroundColor: '#EAEEEC',
+  },
   heroEmojiWrap: {
-    width: 104, height: 104, borderRadius: 34,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    width: 88, height: 88, borderRadius: 28,
+    backgroundColor: 'rgba(0,0,0,0.06)',
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)',
+    borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.08)',
   },
-  heroEmoji: { fontSize: 58 },
-  heroName: {
-    fontSize: 30, fontWeight: '900', color: 'white',
-    textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
-  },
-  heroBreed: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 3, fontWeight: '500' },
+  heroEmoji: { fontSize: 48 },
+  heroNoPhotoText: { fontSize: 13, color: '#aaa', fontWeight: '600' },
   dotsWrap: {
     position: 'absolute', bottom: 14, left: 0, right: 0,
     flexDirection: 'row', justifyContent: 'center', gap: 5,
@@ -688,7 +689,8 @@ const styles = StyleSheet.create({
     shadowColor: '#2D4A47', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 6,
     zIndex: 10,
   },
-  animalName: { fontSize: 28, fontWeight: '900', color: '#111', marginBottom: 10 },
+  animalName: { fontSize: 28, fontWeight: '900', color: '#111', marginBottom: 4 },
+  nameCardLocation: { fontSize: 13, color: '#666', fontWeight: '500', marginBottom: 10 },
   badgeRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 12 },
   badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
   badgeText: { fontSize: 12, fontWeight: '700' },
