@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import { uploadImageToStorage } from '../../lib/uploadImage';
 import { useApp } from '../_appContext';
+import { getDemoPostRows } from '../../constants/demoAnimals';
 
 type Reply = {
   id: string;
@@ -242,6 +243,15 @@ export default function TimelineScreen() {
     }
     const from = offsetRef.current;
     const to = from + PAGE_SIZE - 1;
+
+    // ストア用スクリーンショット撮影時のみ見本投稿を使う
+    if (process.env.EXPO_PUBLIC_DEMO_DATA === '1') {
+      const likeCounts = [12, 8, 24, 5, 15];
+      setPosts(getDemoPostRows().map((row, i) => ({ ...mapToPost(row), likes: likeCounts[i] ?? 0 })));
+      setHasMore(false);
+      if (reset) setLoading(false); else setLoadingMore(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('posts')

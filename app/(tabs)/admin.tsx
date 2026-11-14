@@ -136,11 +136,13 @@ export default function AdminScreen() {
   // 期限まであと何日か（負 = 超過）
   const getDaysUntil = (deadlineStr: string): number | null => {
     if (!deadlineStr) return null;
-    const d = new Date(deadlineStr.replace(/\//g, '-'));
+    // "YYYY-MM-DD" を new Date() に渡すと UTC 0時(日本時間9時)になり1日多く数えるため、端末の日付として組み立てる
+    const [y, m, day] = deadlineStr.replace(/\//g, '-').split('-').map(Number);
+    const d = new Date(y, m - 1, day);
     if (isNaN(d.getTime())) return null;
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.round((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   };
 
   const nearDeadlineAnimals = filtered.filter(a => {

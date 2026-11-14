@@ -171,8 +171,7 @@ export default function MypageScreen() {
   };
 
   const pickPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
+    // システムの写真選択ツールを使うため、写真ライブラリの権限は求めない
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8,
     });

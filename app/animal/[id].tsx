@@ -334,9 +334,11 @@ export default function AnimalDetailScreen() {
             <View style={[styles.badge, { backgroundColor: kindColor.bg }]}>
               <Text style={[styles.badgeText, { color: kindColor.text }]}>{kindColor.label}</Text>
             </View>
-            <View style={[styles.badge, { backgroundColor: animal.statusBg }]}>
-              <Text style={[styles.badgeText, { color: animal.statusColor }]}>{animal.status}</Text>
-            </View>
+            {!animal.urgent && (
+              <View style={[styles.badge, { backgroundColor: animal.statusBg }]}>
+                <Text style={[styles.badgeText, { color: animal.statusColor }]}>{animal.status}</Text>
+              </View>
+            )}
             {animal.urgent && (
               <View style={[styles.badge, { backgroundColor: '#FFE4E4' }]}>
                 <Text style={[styles.badgeText, { color: '#C0392B' }]}>🚨 緊急</Text>

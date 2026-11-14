@@ -4,6 +4,7 @@ import { Lang } from '../lib/i18n';
 import { requestPermission, scheduleLocalNotification } from '../lib/notifications';
 import { storage, STORAGE_KEYS } from '../lib/storage';
 import { supabase } from '../lib/supabase';
+import { getDemoAnimalRows, getDemoPostRows } from '../constants/demoAnimals';
 
 export type Animal = {
   id: string;
@@ -559,6 +560,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchAnimals = useCallback(async () => {
+    // ストア用スクリーンショット撮影時のみ見本データを使う
+    if (process.env.EXPO_PUBLIC_DEMO_DATA === '1') {
+      setAnimals(getDemoAnimalRows().map(row => mapToAnimal(row)));
+      return;
+    }
     const { data, error } = await supabase
       .from('animals')
       .select('id, name, species, breed, gender, description, is_urgent, deadline, admitted_at, status, shelter, prefecture, city, source, user_id, images')
@@ -681,12 +687,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const fetchNearbyPosts = useCallback(async () => {
     setNearbyPostsLoading(true);
-    const { data, error } = await supabase
-      .from('posts')
-      .select('id, type, content, location_prefecture, location_city, images, created_at, lat, lng')
-      .in('type', ['lost', 'found'])
-      .order('created_at', { ascending: false })
-      .limit(50);
+    const { data, error } = process.env.EXPO_PUBLIC_DEMO_DATA === '1'
+      ? { data: getDemoPostRows().filter(r => r.type === 'lost' || r.type === 'found'), error: null }
+      : await supabase
+        .from('posts')
+        .select('id, type, content, location_prefecture, location_city, images, created_at, lat, lng')
+        .in('type', ['lost', 'found'])
+        .order('created_at', { ascending: false })
+        .limit(50);
     if (error) {
       console.error('[AppContext] nearbyPosts fetch error:', error);
       setNearbyPostsLoading(false);
