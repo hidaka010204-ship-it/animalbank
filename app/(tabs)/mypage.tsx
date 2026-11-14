@@ -86,6 +86,7 @@ export default function MypageScreen() {
   const [contactCategory, setContactCategory] = useState('');
   const [contactBody, setContactBody] = useState('');
   const [contactSent, setContactSent] = useState(false);
+  const [contactLoading, setContactLoading] = useState(false);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -300,7 +301,7 @@ export default function MypageScreen() {
                   }
                   <View style={styles.favInfo}>
                     <Text style={styles.favName}>{a.name}</Text>
-                    <Text style={styles.favSub} numberOfLines={1}>📍 {a.shelter}</Text>
+                    <Text style={styles.favSub} numberOfLines={1}>📍 {[a.prefecture, a.city].filter(Boolean).join(' ') || '地域未設定'}</Text>
                   </View>
                   <Text style={styles.heart}>♥</Text>
                 </TouchableOpacity>
@@ -335,7 +336,7 @@ export default function MypageScreen() {
         {renderNotifModal(showNotifModal, () => setShowNotifModal(false), notif, updateNotif)}
         {renderPrivacyModal(showPrivacyModal, () => setShowPrivacyModal(false))}
         {renderTermsModal(showTermsModal, () => setShowTermsModal(false))}
-        {renderContactModal(showContactModal, () => setShowContactModal(false), contactSent, setContactSent, contactName, setContactName, contactEmail, setContactEmail, contactCategory, setContactCategory, contactBody, setContactBody)}
+        {renderContactModal(showContactModal, () => setShowContactModal(false), contactSent, setContactSent, contactName, setContactName, contactEmail, setContactEmail, contactCategory, setContactCategory, contactBody, setContactBody, contactLoading, setContactLoading)}
       </View>
     );
   }
@@ -492,7 +493,7 @@ export default function MypageScreen() {
                 }
                 <View style={styles.favInfo}>
                   <Text style={styles.favName}>{a.name}</Text>
-                  <Text style={styles.favSub} numberOfLines={1}>📍 {a.shelter}</Text>
+                  <Text style={styles.favSub} numberOfLines={1}>📍 {[a.prefecture, a.city].filter(Boolean).join(' ') || '地域未設定'}</Text>
                 </View>
                 <Text style={styles.heart}>♥</Text>
               </TouchableOpacity>
@@ -582,7 +583,7 @@ export default function MypageScreen() {
       {renderNotifModal(showNotifModal, () => setShowNotifModal(false), notif, updateNotif)}
       {renderPrivacyModal(showPrivacyModal, () => setShowPrivacyModal(false))}
       {renderTermsModal(showTermsModal, () => setShowTermsModal(false))}
-      {renderContactModal(showContactModal, () => setShowContactModal(false), contactSent, setContactSent, contactName, setContactName, contactEmail, setContactEmail, contactCategory, setContactCategory, contactBody, setContactBody)}
+      {renderContactModal(showContactModal, () => setShowContactModal(false), contactSent, setContactSent, contactName, setContactName, contactEmail, setContactEmail, contactCategory, setContactCategory, contactBody, setContactBody, contactLoading, setContactLoading)}
     </View>
   );
 }
@@ -712,6 +713,8 @@ function renderContactModal(
   setContactCategory: (v: string) => void,
   contactBody: string,
   setContactBody: (v: string) => void,
+  contactLoading: boolean,
+  setContactLoading: (v: boolean) => void,
 ) {
   return (
     <Modal visible={!!visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -759,23 +762,29 @@ function renderContactModal(
               placeholderTextColor="#bbb" multiline numberOfLines={5} textAlignVertical="top"
             />
             <TouchableOpacity
-              style={[styles.contactSendBtn, (!contactName || !contactEmail || !contactBody) && styles.contactSendBtnDisabled]}
+              style={[styles.contactSendBtn, (!contactName || !contactEmail || !contactBody || contactLoading) && styles.contactSendBtnDisabled]}
+              disabled={!contactName || !contactEmail || !contactBody || contactLoading}
               onPress={async () => {
-                if (!contactName || !contactEmail || !contactBody) return;
-                const { error } = await supabase.from('contacts').insert({
-                  name: contactName,
-                  email: contactEmail,
-                  category: contactCategory || null,
-                  body: contactBody,
-                });
-                if (error) {
-                  showAlert('送信失敗', 'もう一度お試しください');
-                } else {
-                  setContactSent(true);
+                if (!contactName || !contactEmail || !contactBody || contactLoading) return;
+                setContactLoading(true);
+                try {
+                  const { error } = await supabase.from('contacts').insert({
+                    name: contactName,
+                    email: contactEmail,
+                    category: contactCategory || null,
+                    body: contactBody,
+                  });
+                  if (error) {
+                    showAlert('送信失敗', 'もう一度お試しください');
+                  } else {
+                    setContactSent(true);
+                  }
+                } finally {
+                  setContactLoading(false);
                 }
               }}
             >
-              <Text style={styles.contactSendBtnTxt}>送信する</Text>
+              <Text style={styles.contactSendBtnTxt}>{contactLoading ? '送信中...' : '送信する'}</Text>
             </TouchableOpacity>
             <View style={{ height: 40 }} />
           </ScrollView>

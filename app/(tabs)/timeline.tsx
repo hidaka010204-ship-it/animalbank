@@ -226,6 +226,9 @@ export default function TimelineScreen() {
   const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
   const [replyImages, setReplyImages] = useState<Record<string, string[]>>({});
 
+  // いいね連打防止
+  const likingIds = useRef(new Set<string>());
+
   const filtered = activeFilter === 'all' ? posts : posts.filter(p => p.type === activeFilter);
 
   const PAGE_SIZE = 20;
@@ -248,6 +251,7 @@ export default function TimelineScreen() {
 
     if (error) {
       console.error('[fetchPosts] エラー:', error);
+      if (!reset) setHasMore(false);
     } else {
       const newPosts = (data ?? []).map(row => mapToPost(row as Record<string, unknown>));
 
@@ -542,10 +546,12 @@ export default function TimelineScreen() {
     if (!requireLogin('いいね')) return;
     const uid = session?.user?.id;
     if (!uid) return;
+    if (likingIds.current.has(id)) return;
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newLiked = !post.liked;
     const newCount = newLiked ? post.likes + 1 : post.likes - 1;
+    likingIds.current.add(id);
     setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: newLiked, likes: newCount } : p));
     if (newLiked) {
       const { error } = await supabase.from('post_likes').insert({ post_id: id, user_id: uid });
@@ -554,6 +560,7 @@ export default function TimelineScreen() {
       const { error } = await supabase.from('post_likes').delete().eq('post_id', id).eq('user_id', uid);
       if (error) setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !newLiked, likes: post.likes } : p));
     }
+    likingIds.current.delete(id);
   };
 
   const toggleReplies = (id: string) => {
@@ -650,14 +657,16 @@ export default function TimelineScreen() {
     ]);
   };
 
-  const submitReply = (postId: string) => {
+  const submitReply = async (postId: string) => {
     const text = replyInputs[postId]?.trim() || '';
     const images = replyImages[postId] || [];
     if (!text && images.length === 0) return;
+    if (!requireLogin('返信')) return;
+    const uid = session?.user?.id;
     const reply: Reply = {
       id: Date.now().toString(),
-      avatar: '👤',
-      name: 'あなた',
+      avatar: userProfile.avatar || '👤',
+      name: userProfile.nickname || 'あなた',
       time: 'たった今',
       text,
       images,
@@ -667,6 +676,16 @@ export default function TimelineScreen() {
     ));
     setReplyInputs(prev => ({ ...prev, [postId]: '' }));
     setReplyImages(prev => ({ ...prev, [postId]: [] }));
+    if (uid) {
+      const { error } = await supabase.from('post_replies').insert({
+        post_id: postId,
+        user_id: uid,
+        user_nickname: userProfile.nickname || null,
+        user_avatar: userProfile.avatar || null,
+        content: text,
+      });
+      if (error) console.error('[submitReply] DB保存エラー:', error.message);
+    }
   };
 
   const renderItem = ({ item: post }: { item: Post }) => {
@@ -804,6 +823,7 @@ export default function TimelineScreen() {
               />
               <TouchableOpacity
                 style={[styles.replySendBtn, !replyInputs[post.id]?.trim() && pendingReplyImages.length === 0 && styles.replySendDisabled]}
+                disabled={!replyInputs[post.id]?.trim() && pendingReplyImages.length === 0}
                 onPress={() => submitReply(post.id)}
               >
                 <Text style={styles.replySendText}>送信</Text>

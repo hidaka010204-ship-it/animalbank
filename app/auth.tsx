@@ -83,26 +83,30 @@ export default function AuthScreen() {
       return;
     }
     setEmailLoading(true);
-    if (mode === 'signin') {
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(), password,
-      });
-      setEmailLoading(false);
-      if (authError) {
-        setError('メールアドレスまたはパスワードが正しくありません');
+    try {
+      if (mode === 'signin') {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: email.trim(), password,
+        });
+        if (authError) {
+          setError('メールアドレスまたはパスワードが正しくありません');
+        } else {
+          router.replace('/(tabs)');
+        }
       } else {
-        router.replace('/(tabs)');
+        const { error: authError } = await supabase.auth.signUp({
+          email: email.trim(), password,
+        });
+        if (authError) {
+          setError(authError.message);
+        } else {
+          setSignupDone(true);
+        }
       }
-    } else {
-      const { error: authError } = await supabase.auth.signUp({
-        email: email.trim(), password,
-      });
+    } catch {
+      setError('ネットワークエラーが発生しました。再度お試しください。');
+    } finally {
       setEmailLoading(false);
-      if (authError) {
-        setError(authError.message);
-      } else {
-        setSignupDone(true);
-      }
     }
   };
 

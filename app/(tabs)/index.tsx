@@ -354,10 +354,12 @@ export default function HomeScreen() {
               {!!(animal.age || animal.weight) && (
                 <Text style={styles.cardMeta}>{[animal.age, animal.weight].filter(Boolean).join(' · ')}</Text>
               )}
-              {!!(animal.prefecture || animal.shelter) && (
+              {!!(animal.prefecture || animal.city) ? (
                 <Text style={styles.cardLocation} numberOfLines={1}>
-                  📍 {[animal.prefecture, animal.shelter].filter(Boolean).join('  ')}
+                  📍 {[animal.prefecture, animal.city].filter(Boolean).join(' ')}
                 </Text>
+              ) : (
+                <Text style={styles.cardLocationEmpty} numberOfLines={1}>📍 地域未設定</Text>
               )}
               <View style={styles.pillRow}>
                 {animal.urgent && <View style={styles.pillRed}><Text style={styles.pillRedTxt}>🚨 緊急</Text></View>}
@@ -511,10 +513,14 @@ export default function HomeScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.urgentCardName}>{animal.name}</Text>
-                          <Text style={styles.urgentCardBreed}>{animal.breed} · {animal.age}</Text>
-                          <Text style={styles.urgentCardShelter} numberOfLines={1}>
-                            📍 {[animal.prefecture, animal.shelter].filter(Boolean).join('  ')}
-                          </Text>
+                          {!!(animal.breed || animal.age) && (
+                            <Text style={styles.urgentCardBreed}>{[animal.breed, animal.age].filter(Boolean).join(' · ')}</Text>
+                          )}
+                          {!!(animal.prefecture || animal.city) && (
+                            <Text style={styles.urgentCardShelter} numberOfLines={1}>
+                              📍 {[animal.prefecture, animal.city].filter(Boolean).join(' ')}
+                            </Text>
+                          )}
                           {!!animal.deadline && <Text style={styles.urgentCardDeadline}>{animal.deadline}</Text>}
                         </View>
                       </View>
@@ -711,6 +717,7 @@ const styles = StyleSheet.create({
   cardMeta: { fontSize: 12, color: '#999', marginBottom: 4 },
   cardShelter: { fontSize: 11, color: '#bbb', marginBottom: 8 },
   cardLocation: { fontSize: 12, color: '#555', marginBottom: 7, fontWeight: '500' },
+  cardLocationEmpty: { fontSize: 12, color: '#bbb', marginBottom: 7 },
   pillRow: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
   pillRed: { backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   pillRedTxt: { fontSize: 10, color: '#DC2626', fontWeight: '700' },

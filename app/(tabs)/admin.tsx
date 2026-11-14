@@ -65,6 +65,8 @@ export default function AdminScreen() {
   const [userPostBreed, setUserPostBreed] = useState('');
   const [userPostShelter, setUserPostShelter] = useState('');
   const [userPostPrefecture, setUserPostPrefecture] = useState('');
+  const [userPostCity, setUserPostCity] = useState('');
+  const [showUserPrefPicker, setShowUserPrefPicker] = useState(false);
   const [userPostDeadlineObj, setUserPostDeadlineObj] = useState<Date | null>(null);
   const [showUserDeadlinePicker, setShowUserDeadlinePicker] = useState(false);
   const [userPostAge, setUserPostAge] = useState('');
@@ -100,6 +102,7 @@ export default function AdminScreen() {
   const [shelterIndex, setShelterIndex] = useState(0);
   const [shelterCustom, setShelterCustom] = useState('');
   const [prefectureCustom, setPrefectureCustom] = useState('');
+  const [cityInput, setCityInput] = useState('');
   const [notes, setNotes] = useState('');
   const [formImages, setFormImages] = useState<string[]>([]);
   const [showShelterPicker, setShowShelterPicker] = useState(false);
@@ -204,6 +207,9 @@ export default function AdminScreen() {
 
   const register = async () => {
     if (!animalName.trim()) { showAlert('名前を入力してください'); return; }
+    const selectedPref = selectedShelter.name === 'その他' ? prefectureCustom.trim() : selectedShelter.prefecture;
+    if (!selectedPref) { showAlert('都道府県を入力してください'); return; }
+    if (!cityInput.trim()) { showAlert('市区町村を入力してください'); return; }
     setSubmitting(true);
     try {
       const speciesMap: Record<AnimalKind, string> = { '犬': 'dog', '猫': 'cat', 'その他': 'other' };
@@ -221,6 +227,7 @@ export default function AdminScreen() {
           status: 'available',
           shelter: selectedShelter.name === 'その他' ? shelterCustom.trim() || null : selectedShelter.name,
           prefecture: selectedShelter.name === 'その他' ? prefectureCustom.trim() || null : selectedShelter.prefecture,
+          city: cityInput.trim() || null,
           source: 'shelter',
           user_id: session?.user?.id ?? null,
         })
@@ -258,7 +265,7 @@ export default function AdminScreen() {
   const resetForm = () => {
     setAnimalName(''); setAnimalKind('犬'); setBreed(''); setAge(''); setWeight('');
     setDeadlineDateObj(null); setShelterIndex(0); setShelterCustom('');
-    setPrefectureCustom(''); setNotes(''); setFormImages([]); setRegistered(false);
+    setPrefectureCustom(''); setCityInput(''); setNotes(''); setFormImages([]); setRegistered(false);
   };
 
   const closeCompose = () => {
@@ -293,6 +300,8 @@ export default function AdminScreen() {
   // 一般ユーザー登録（animals テーブルに source='public' で保存）
   const submitUserPost = async () => {
     if (!userPostName.trim()) { showAlert('名前を入力してください'); return; }
+    if (!userPostPrefecture.trim()) { showAlert('都道府県を選択してください'); return; }
+    if (!userPostCity.trim()) { showAlert('市区町村を入力してください'); return; }
     setUserPostSubmitting(true);
     try {
       const speciesMap: Record<AnimalKind, string> = { '犬': 'dog', '猫': 'cat', 'その他': 'other' };
@@ -313,6 +322,7 @@ export default function AdminScreen() {
           status: 'available',
           shelter: userPostShelter.trim() || null,
           prefecture: userPostPrefecture.trim() || null,
+          city: userPostCity.trim() || null,
           source: 'public',
           user_id: session?.user?.id ?? null,
         })
@@ -345,7 +355,7 @@ export default function AdminScreen() {
 
   const resetUserPost = () => {
     setUserPostKind('犬'); setUserPostName(''); setUserPostBreed('');
-    setUserPostShelter(''); setUserPostPrefecture('');
+    setUserPostShelter(''); setUserPostPrefecture(''); setUserPostCity('');
     setUserPostDeadlineObj(null); setShowUserDeadlinePicker(false);
     setUserPostAge(''); setUserPostWeight('');
     setShowUserAgePicker(false); setShowUserWeightPicker(false);
@@ -542,7 +552,9 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
             <Text style={styles.cardMetaDot}>·</Text>
             <Text style={styles.cardMeta}>{animal.weight}</Text>
           </View>
-          <Text style={styles.cardShelter}>📍 {animal.shelter}</Text>
+          <Text style={styles.cardShelter}>
+            📍 {[animal.prefecture, animal.city].filter(Boolean).join(' ') || '地域未設定'}
+          </Text>
         </View>
       </View>
 
@@ -591,7 +603,10 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.postBtn} onPress={() => setShowRegisterTypeSheet(true)}>
+          <TouchableOpacity style={styles.postBtn} onPress={() => {
+            if (!session) { showAlert('ログインが必要です', '登録するにはログインしてください'); return; }
+            setShowRegisterTypeSheet(true);
+          }}>
             <Text style={styles.postBtnText}>＋ 登録</Text>
           </TouchableOpacity>
         </View>
@@ -940,9 +955,32 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
                   </TouchableOpacity>
                 )}
 
-                <Text style={styles.fieldLabel}>都道府県</Text>
-                <TextInput style={styles.input} value={userPostPrefecture} onChangeText={setUserPostPrefecture}
-                  placeholder="例：愛知県" placeholderTextColor="#999" />
+                <Text style={styles.fieldLabel}>都道府県 *</Text>
+                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowUserPrefPicker(p => !p)}>
+                  <Text style={[styles.pickerBtnText, !userPostPrefecture && styles.pickerBtnPlaceholder]}>
+                    {userPostPrefecture || '選択してください'}
+                  </Text>
+                  <Text style={styles.pickerArrow}>{showUserPrefPicker ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+                {showUserPrefPicker && (
+                  <View style={styles.shelterList}>
+                    {PREFECTURE_STATS.map((p) => (
+                      <TouchableOpacity
+                        key={p.prefecture}
+                        style={[styles.shelterItem, userPostPrefecture === p.prefecture && styles.shelterItemActive]}
+                        onPress={() => { setUserPostPrefecture(p.prefecture); setShowUserPrefPicker(false); }}
+                      >
+                        <Text style={[styles.shelterItemText, userPostPrefecture === p.prefecture && styles.shelterItemTextActive]}>
+                          {p.prefecture}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                <Text style={styles.fieldLabel}>市区町村 *</Text>
+                <TextInput style={styles.input} value={userPostCity} onChangeText={setUserPostCity}
+                  placeholder="例：世田谷区、名古屋市中区" placeholderTextColor="#999" />
 
                 <Text style={styles.fieldLabel}>保護場所</Text>
                 <TextInput style={styles.input} value={userPostShelter} onChangeText={setUserPostShelter}
@@ -1183,6 +1221,10 @@ const renderAnimalCard = (animal: typeof animals[0], daysLabel: string | null, d
                     <TextInput style={styles.input} value={prefectureCustom} onChangeText={setPrefectureCustom} placeholder="都道府県を入力（例：愛知県）" placeholderTextColor="#999" />
                   </>
                 )}
+
+                <Text style={styles.fieldLabel}>市区町村 *</Text>
+                <TextInput style={styles.input} value={cityInput} onChangeText={setCityInput}
+                  placeholder="例：中津川市、名古屋市中区" placeholderTextColor="#999" />
 
                 <Text style={styles.fieldLabel}>写真</Text>
                 <TouchableOpacity style={styles.photoBtn} onPress={pickImages}>

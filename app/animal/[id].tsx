@@ -9,14 +9,16 @@ import {
 } from 'react-native';
 import { showAlert } from '../../lib/alert';
 import { supabase } from '../../lib/supabase';
-import { mapToAnimal, useApp } from '../_appContext';
+import { mapToAnimal, useApp, PREFECTURE_STATS } from '../_appContext';
+
+const PREFECTURE_LIST = PREFECTURE_STATS.map(p => p.prefecture);
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
 export default function AnimalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { animals, loading, favorites, toggleFavorite, userProfile, session, refreshAnimals, themeColor } = useApp();
+  const { animals, loading, favorites, toggleFavorite, userProfile, session, refreshAnimals, themeColor, isAdminLoggedIn } = useApp();
   const contextAnimal = animals.find(a => a.id === id);
   const [localAnimal, setLocalAnimal] = useState<ReturnType<typeof mapToAnimal> | null>(null);
   const [localLoading, setLocalLoading] = useState(false);
@@ -27,7 +29,7 @@ export default function AnimalDetailScreen() {
       setLocalLoading(true);
       supabase
         .from('animals')
-        .select('id, name, species, breed, gender, description, is_urgent, deadline, admitted_at, status, shelter, prefecture, source, user_id, images')
+        .select('id, name, species, breed, gender, description, is_urgent, deadline, admitted_at, status, shelter, prefecture, city, source, user_id, images')
         .eq('id', id)
         .single()
         .then(({ data, error }) => {
@@ -62,10 +64,16 @@ export default function AnimalDetailScreen() {
   const [housingType, setHousingType] = useState('');
   const [reason, setReason] = useState('');
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
-  const [imgLoading, setImgLoading] = useState<Record<number, boolean>>({});
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState('');
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  // 管理者編集
+  const [showAdminEdit, setShowAdminEdit] = useState(false);
+  const [editPref, setEditPref] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editShelter, setEditShelter] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [showEditPrefPicker, setShowEditPrefPicker] = useState(false);
   // Web では window幅≠コンテナ幅になるので onLayout で実際の幅を取る
   const [heroW, setHeroW] = useState(Platform.OS === 'web' ? Math.min(SW, 430) : SW);
   const heroH = Math.min(Math.round(heroW * 0.75), Math.round(SH * 0.5));
@@ -223,7 +231,14 @@ export default function AnimalDetailScreen() {
 
         {/* ── ヒーロー写真エリア ── */}
         <View
-          style={{ width: '100%' as any, height: heroH, backgroundColor: animal.images.length > 0 ? '#111' : '#EAEEEC' }}
+          style={{
+            width: '100%' as any,
+            aspectRatio: 4 / 3,
+            maxHeight: SH * 0.5,
+            overflow: 'hidden',
+            position: 'relative' as any,
+            backgroundColor: animal.images.length > 0 ? '#111' : '#EAEEEC',
+          }}
           onLayout={(e) => { const w = e.nativeEvent.layout.width; if (w > 0 && w !== heroW) setHeroW(w); }}
         >
           {animal.images.length > 0 ? (
@@ -233,23 +248,20 @@ export default function AnimalDetailScreen() {
                 showsHorizontalScrollIndicator={false}
                 onScroll={e => setCurrentPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / heroW))}
                 scrollEventThrottle={16}
-                style={{ width: heroW, height: heroH }}
+                style={StyleSheet.absoluteFill}
+                contentContainerStyle={{ width: heroW * animal.images.length, height: heroH }}
               >
                 {animal.images.map((uri, i) => (
                   <TouchableOpacity
                     key={i} style={{ width: heroW, height: heroH }}
                     onPress={() => setLightboxUri(uri)} activeOpacity={0.95}
                   >
+                    <ActivityIndicator style={StyleSheet.absoluteFill} color="#A8D8CF" size="large" />
                     <Image
                       source={{ uri }}
-                      style={{ width: heroW, height: heroH }}
-                      resizeMode="contain"
-                      onLoadStart={() => setImgLoading(p => ({ ...p, [i]: true }))}
-                      onLoadEnd={() => setImgLoading(p => ({ ...p, [i]: false }))}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
                     />
-                    {imgLoading[i] && (
-                      <ActivityIndicator style={StyleSheet.absoluteFill} color="#A8D8CF" size="large" />
-                    )}
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -312,9 +324,9 @@ export default function AnimalDetailScreen() {
         {/* ── 名前 + バッジカード（ヒーローに重ねる） ── */}
         <View style={styles.nameCard}>
           <Text style={styles.animalName}>{animal.name}</Text>
-          {!!(animal.prefecture || animal.shelter) && (
+          {!!(animal.prefecture || animal.city) && (
             <Text style={styles.nameCardLocation} numberOfLines={1}>
-              📍 {[animal.prefecture, animal.shelter].filter(Boolean).join('  ')}
+              📍 {[animal.prefecture, animal.city].filter(Boolean).join(' ')}
             </Text>
           )}
 
@@ -393,8 +405,8 @@ export default function AnimalDetailScreen() {
           </View>
         )}
 
-        {/* ── 保健所カード ── */}
-        {(!!animal.shelter || !!animal.prefecture) && (
+        {/* ── 保健所 / 掲載者カード ── */}
+        {(!!animal.shelter || !!animal.prefecture || !!animal.city) && (
           <View style={styles.shelterCard}>
             <LinearGradient
               colors={['#EAF6F4', '#D4EEE9']}
@@ -408,11 +420,44 @@ export default function AnimalDetailScreen() {
                 <Text style={[styles.shelterLabel, { color: themeColor }]}>
                   {animal.source === 'shelter' ? '保健所・収容施設' : '掲載者情報'}
                 </Text>
-                {!!animal.shelter && <Text style={styles.shelterName}>{animal.shelter}</Text>}
-                {!!animal.prefecture && <Text style={styles.shelterPref}>📍 {animal.prefecture}</Text>}
+                {!!animal.shelter && (
+                  <Text style={styles.shelterName}>{animal.shelter}</Text>
+                )}
+                {!!(animal.prefecture || animal.city) && (
+                  <Text style={styles.shelterPref}>
+                    📍 {[animal.prefecture, animal.city].filter(Boolean).join(' ')}
+                  </Text>
+                )}
               </View>
+              {isAdminLoggedIn && (
+                <TouchableOpacity
+                  style={styles.adminEditBtn}
+                  onPress={() => {
+                    setEditPref(animal.prefecture);
+                    setEditCity(animal.city);
+                    setEditShelter(animal.shelter);
+                    setShowAdminEdit(true);
+                  }}
+                >
+                  <Text style={styles.adminEditBtnTxt}>編集</Text>
+                </TouchableOpacity>
+              )}
             </LinearGradient>
           </View>
+        )}
+        {/* 保健所カードがない場合も管理者は編集できるようにする */}
+        {isAdminLoggedIn && !animal.shelter && !animal.prefecture && !animal.city && (
+          <TouchableOpacity
+            style={styles.adminEditBtnStandalone}
+            onPress={() => {
+              setEditPref(animal.prefecture);
+              setEditCity(animal.city);
+              setEditShelter(animal.shelter);
+              setShowAdminEdit(true);
+            }}
+          >
+            <Text style={styles.adminEditBtnTxt}>📍 地域・保護場所を設定</Text>
+          </TouchableOpacity>
         )}
 
         {/* ── 説明文 ── */}
@@ -603,6 +648,75 @@ export default function AnimalDetailScreen() {
           </TouchableOpacity>
         </Modal>
       )}
+
+      {/* 管理者編集モーダル */}
+      <Modal visible={showAdminEdit} animationType="slide" transparent onRequestClose={() => setShowAdminEdit(false)}>
+        <View style={styles.adminEditOverlay}>
+          <View style={styles.adminEditSheet}>
+            <Text style={styles.adminEditTitle}>地域・保護場所を編集</Text>
+
+            <Text style={styles.adminEditLabel}>都道府県</Text>
+            <TouchableOpacity style={styles.adminEditPicker} onPress={() => setShowEditPrefPicker(p => !p)}>
+              <Text style={editPref ? styles.adminEditPickerTxt : styles.adminEditPickerPlaceholder}>
+                {editPref || '選択してください'}
+              </Text>
+              <Text style={styles.adminEditPickerArrow}>{showEditPrefPicker ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            {showEditPrefPicker && (
+              <ScrollView style={styles.adminEditPrefList} nestedScrollEnabled>
+                {PREFECTURE_LIST.map(p => (
+                  <TouchableOpacity key={p} style={[styles.adminEditPrefItem, editPref === p && styles.adminEditPrefItemActive]}
+                    onPress={() => { setEditPref(p); setShowEditPrefPicker(false); }}>
+                    <Text style={[styles.adminEditPrefItemTxt, editPref === p && styles.adminEditPrefItemTxtActive]}>{p}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            <Text style={styles.adminEditLabel}>市区町村</Text>
+            <TextInput
+              style={styles.adminEditInput}
+              value={editCity} onChangeText={setEditCity}
+              placeholder="例：世田谷区" placeholderTextColor="#bbb"
+            />
+
+            <Text style={styles.adminEditLabel}>保護場所（任意）</Text>
+            <TextInput
+              style={styles.adminEditInput}
+              value={editShelter} onChangeText={setEditShelter}
+              placeholder="例：自宅、〇〇保健所" placeholderTextColor="#bbb"
+            />
+
+            <View style={styles.adminEditActions}>
+              <TouchableOpacity style={styles.adminEditCancelBtn} onPress={() => setShowAdminEdit(false)}>
+                <Text style={styles.adminEditCancelTxt}>キャンセル</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.adminEditSaveBtn, editSaving && { opacity: 0.6 }]}
+                disabled={editSaving}
+                onPress={async () => {
+                  if (!animal) return;
+                  setEditSaving(true);
+                  const { error } = await supabase.from('animals').update({
+                    prefecture: editPref || null,
+                    city: editCity.trim() || null,
+                    shelter: editShelter.trim() || null,
+                  }).eq('id', animal.id);
+                  setEditSaving(false);
+                  if (error) {
+                    showAlert('保存失敗', error.message);
+                  } else {
+                    setShowAdminEdit(false);
+                    await refreshAnimals();
+                  }
+                }}
+              >
+                <Text style={styles.adminEditSaveTxt}>{editSaving ? '保存中...' : '保存'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -745,6 +859,28 @@ const styles = StyleSheet.create({
   shelterLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginBottom: 3 },
   shelterName: { fontSize: 16, fontWeight: '800', color: '#1a1a1a', marginBottom: 2 },
   shelterPref: { fontSize: 12, color: '#666', fontWeight: '500' },
+  adminEditBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#4FA3A0' },
+  adminEditBtnTxt: { fontSize: 12, color: '#4FA3A0', fontWeight: '700' },
+  adminEditBtnStandalone: { marginHorizontal: 14, marginTop: 8, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#4FA3A0', borderStyle: 'dashed' as any, alignItems: 'center' },
+  adminEditOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  adminEditSheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '85%' as any },
+  adminEditTitle: { fontSize: 17, fontWeight: '800', color: '#1a1a1a', marginBottom: 20, textAlign: 'center' },
+  adminEditLabel: { fontSize: 13, fontWeight: '700', color: '#444', marginBottom: 6, marginTop: 14 },
+  adminEditInput: { borderWidth: 1.5, borderColor: '#D4EEE9', borderRadius: 12, padding: 12, fontSize: 15, color: '#111' },
+  adminEditPicker: { borderWidth: 1.5, borderColor: '#D4EEE9', borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  adminEditPickerTxt: { fontSize: 15, color: '#111' },
+  adminEditPickerPlaceholder: { fontSize: 15, color: '#bbb' },
+  adminEditPickerArrow: { fontSize: 12, color: '#888' },
+  adminEditPrefList: { maxHeight: 180, borderWidth: 1, borderColor: '#D4EEE9', borderRadius: 12, marginTop: 4 },
+  adminEditPrefItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  adminEditPrefItemActive: { backgroundColor: '#EAF6F4' },
+  adminEditPrefItemTxt: { fontSize: 14, color: '#333' },
+  adminEditPrefItemTxtActive: { color: '#4FA3A0', fontWeight: '700' },
+  adminEditActions: { flexDirection: 'row', gap: 12, marginTop: 24 },
+  adminEditCancelBtn: { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: '#ddd', alignItems: 'center' },
+  adminEditCancelTxt: { fontSize: 15, color: '#666', fontWeight: '600' },
+  adminEditSaveBtn: { flex: 2, padding: 14, borderRadius: 12, backgroundColor: '#4FA3A0', alignItems: 'center' },
+  adminEditSaveTxt: { fontSize: 15, color: '#fff', fontWeight: '800' },
 
   // ── 説明文 ──
   descText: { fontSize: 14, color: '#444', lineHeight: 24 },
